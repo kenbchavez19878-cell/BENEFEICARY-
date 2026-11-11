@@ -1,7 +1,30 @@
 import secrets
+import uuid
+from pathlib import Path
 from decimal import Decimal
 from django.db import models
 from django.utils import timezone
+
+
+def case_document_path(instance, filename):
+    return f'case_documents/{uuid.uuid4().hex}{Path(filename).suffix.lower()}'
+
+
+class CaseDocument(models.Model):
+    women_case = models.ForeignKey('WomenAndSoloParentCase', null=True, blank=True, on_delete=models.CASCADE, related_name='attachments')
+    aics_case = models.ForeignKey('AicsCase', null=True, blank=True, on_delete=models.CASCADE, related_name='attachments')
+    requirement_id = models.CharField(max_length=80)
+    name = models.CharField(max_length=255)
+    original_name = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=80)
+    file = models.FileField(upload_to=case_document_path)
+    uploaded_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [models.CheckConstraint(
+            condition=(models.Q(women_case__isnull=False, aics_case__isnull=True) | models.Q(women_case__isnull=True, aics_case__isnull=False)),
+            name='document_has_one_case',
+        )]
 
 
 def generate_unique_identifier(model_class, field_name: str, prefix: str, date_format: str = '%Y%m%d', digits: int = 4) -> str:

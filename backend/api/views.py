@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 from django.db.models import Q
-from django.http import Http404
+from django.http import Http404, FileResponse
+from django.shortcuts import get_object_or_404
+from .models import CaseDocument
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -512,3 +514,18 @@ class HealthCheckView(APIView):
             'status': 'ok',
             'timestamp': datetime.now(timezone.utc).isoformat()
         }, status=status.HTTP_200_OK)
+
+
+class CaseDocumentFileView(APIView):
+    def get(self, request, pk):
+        document = get_object_or_404(CaseDocument, pk=pk)
+        case = document.aics_case or document.women_case
+        self.check_object_permissions(request, case)
+        try:
+            stream = document.file.open('rb')
+        except FileNotFoundError:
+            raise Http404('Document file is unavailable.')
+        response = FileResponse(stream, content_type=document.content_type, filename=document.original_name)
+        response['X-Content-Type-Options'] = 'nosniff'
+        response['Cache-Control'] = 'private, no-store'
+        return response

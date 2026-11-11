@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { X, UserPlus, CheckCircle2, ShieldCheck, HeartHandshake, Baby, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
+import { IntakeDocumentUploads, SOLO_PARENT_REQUIREMENTS, WOMEN_REQUIREMENTS } from "./IntakeDocumentUploads";
+import type { IntakeDocument } from "../services/caseService";
 import { apiCreateWomenSoloParentCase, saveSecretarySubmittedCase } from "../services/caseService";
 
 interface NewWomenSoloParentModalProps {
@@ -55,6 +57,7 @@ const SOLO_PARENT_REASONS = [
 
 export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomenSoloParentModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [documents, setDocuments] = useState<IntakeDocument[]>([]);
   const [trackingNumber] = useState(() => `BEN-2026-${Math.floor(100000 + Math.random() * 900000)}`);
 
   // Form State
@@ -71,10 +74,13 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
   const [initialStatus, setInitialStatus] = useState<"BARANGAY_ENDORSED" | "UNDER_REVIEW">("BARANGAY_ENDORSED");
   const [notes, setNotes] = useState("");
 
+  const requirements = category === "SOLO_PARENT" ? SOLO_PARENT_REQUIREMENTS : WOMEN_REQUIREMENTS;
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!fullName.trim()) {
       toast.error("Please enter the beneficiary's full name");
       return;
@@ -97,11 +103,12 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
         status: initialStatus,
         financialAidAmount: 3000,
         notes: notes.trim() || undefined,
-      });
+      }, documents.filter((doc) => requirements.some((requirement) => requirement.id === doc.id)));
 
       const assignedTracking = (createdRecord as any)?.tracking_id || createdRecord?.case_number || trackingNumber;
       saveSecretarySubmittedCase(assignedTracking);
       toast.success(`Beneficiary profile registered successfully with Tracking ID: ${assignedTracking}`);
+      setDocuments([]);
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -396,6 +403,12 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
               </div>
             </div>
           </div>
+          <IntakeDocumentUploads
+            requirements={requirements}
+            documents={documents}
+            onChange={setDocuments}
+            disabled={isSubmitting}
+          />
         </form>
 
         {/* Modal Footer */}

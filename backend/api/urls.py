@@ -7,9 +7,11 @@ from .views import (
     UniversalCaseStepView,
     DashboardStatsView,
     HealthCheckView,
+    CaseDocumentFileView,
 )
 
 urlpatterns = [
+    re_path(r'^documents/(?P<pk>[0-9]+)/file/?$', CaseDocumentFileView.as_view(), name='case-document-file'),
     # System health check
     re_path(r'^health/?$', HealthCheckView.as_view(), name='api-health'),
 

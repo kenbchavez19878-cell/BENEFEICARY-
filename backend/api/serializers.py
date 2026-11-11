@@ -2,6 +2,7 @@ from decimal import Decimal
 from django.utils import timezone
 from rest_framework import serializers
 from .models import Beneficiary, WomenAndSoloParentCase, AicsCase
+from .documents import CaseDocumentsMixin
 
 
 CAMEL_TO_SNAKE_MAP = {
@@ -140,7 +141,7 @@ class BeneficiarySerializer(CleanEmptyStringMixin, serializers.ModelSerializer):
         return f"{obj.first_name} {obj.last_name}".strip()
 
 
-class WomenAndSoloParentCaseSerializer(CleanEmptyStringMixin, serializers.ModelSerializer):
+class WomenAndSoloParentCaseSerializer(CaseDocumentsMixin, CleanEmptyStringMixin, serializers.ModelSerializer):
     """
     Serializer for Women & Solo Parent case records.
     Safely accepts partial form inputs and lets the model auto-generate unique identifiers.
@@ -182,6 +183,9 @@ class WomenAndSoloParentCaseSerializer(CleanEmptyStringMixin, serializers.ModelS
             'eligibility',
             'eligibility_display',
             'documents_status',
+            'documents',
+            'uploaded_files',
+            'document_metadata',
             'assessment_notes',
             'vulnerability_level',
             'vulnerability_display',
@@ -216,7 +220,7 @@ class WomenAndSoloParentCaseSerializer(CleanEmptyStringMixin, serializers.ModelS
         return value
 
 
-class AicsCaseSerializer(CleanEmptyStringMixin, serializers.ModelSerializer):
+class AicsCaseSerializer(CaseDocumentsMixin, CleanEmptyStringMixin, serializers.ModelSerializer):
     """
     Serializer for AICS Crisis cases.
     Safely accepts partial form inputs and lets the model auto-generate unique identifiers.
@@ -260,6 +264,9 @@ class AicsCaseSerializer(CleanEmptyStringMixin, serializers.ModelSerializer):
             'eligibility',
             'eligibility_display',
             'documents_status',
+            'documents',
+            'uploaded_files',
+            'document_metadata',
             'assessment_notes',
             'approved_amount',
             'release_method',

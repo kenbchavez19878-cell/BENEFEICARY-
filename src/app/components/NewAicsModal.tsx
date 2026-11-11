@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { X, HeartHandshake, CheckCircle2, Stethoscope, Cross, Bus, DollarSign, MapPin, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
+import { IntakeDocumentUploads, aicsRequirements } from "./IntakeDocumentUploads";
+import type { IntakeDocument } from "../services/caseService";
 import { apiCreateAicsCase, saveSecretarySubmittedCase } from "../services/caseService";
 
 interface NewAicsModalProps {
@@ -61,6 +63,7 @@ const CRISIS_TYPES: Array<{
 
 export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [documents, setDocuments] = useState<IntakeDocument[]>([]);
   const [trackingNumber] = useState(() => `AICS-2026-${Math.floor(100000 + Math.random() * 900000)}`);
 
   // Form State
@@ -76,6 +79,8 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
   const [requestedAmount, setRequestedAmount] = useState(5000);
   const [initialStatus, setInitialStatus] = useState<"BARANGAY_ENDORSED" | "UNDER_REVIEW">("BARANGAY_ENDORSED");
 
+  const requirements = aicsRequirements(crisisType);
+
   if (!isOpen) return null;
 
   const handleCrisisTypeSelect = (typeId: any, defaultAmt: number) => {
@@ -85,6 +90,7 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!fullName.trim()) {
       toast.error("Please enter the beneficiary's full name");
       return;
@@ -105,11 +111,12 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
         serviceProvider: serviceProvider.trim() || undefined,
         requestedAmount: Number(requestedAmount) || 5000,
         status: initialStatus,
-      });
+      }, documents.filter((doc) => requirements.some((requirement) => requirement.id === doc.id)));
 
       const assignedTracking = (createdRecord as any)?.tracking_id || createdRecord?.case_number || trackingNumber;
       saveSecretarySubmittedCase(assignedTracking);
       toast.success(`AICS crisis intake registered successfully with Tracking ID: ${assignedTracking}`);
+      setDocuments([]);
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -363,6 +370,12 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
               </div>
             </div>
           </div>
+          <IntakeDocumentUploads
+            requirements={requirements}
+            documents={documents}
+            onChange={setDocuments}
+            disabled={isSubmitting}
+          />
         </form>
 
         {/* Modal Footer */}

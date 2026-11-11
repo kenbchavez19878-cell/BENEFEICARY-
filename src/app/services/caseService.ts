@@ -1,5 +1,22 @@
 import type { CaseData, DocumentCheckItem, TimelineEntry, WorkflowStatusCode } from "../components/MSWDCaseWorkflowModal";
 
+export interface IntakeDocument {
+  id: string;
+  name: string;
+  file: File;
+}
+
+// Let the browser set the multipart boundary; File objects cannot be JSON encoded.
+function intakeRequest(data: object, documents: IntakeDocument[] = []): RequestInit {
+  const body = new FormData();
+  body.append('payload', JSON.stringify({
+    ...data,
+    document_metadata: documents.map(({ id, name }) => ({ id, name })),
+  }));
+  documents.forEach(({ file }) => body.append('uploaded_files', file, file.name));
+  return { method: 'POST', body };
+}
+
 export interface DbCaseRecord {
   id?: number;
   case_number: string;
@@ -9,6 +26,7 @@ export interface DbCaseRecord {
   aics_type?: 'MEDICAL' | 'BURIAL' | 'TRANSPORTATION' | 'ECONOMIC_RELIEF' | 'BALIK_PROBINSYA';
   status: WorkflowStatusCode;
   eligibility?: 'ELIGIBLE' | 'NOT_ELIGIBLE' | 'ADDITIONAL_REQUIREMENTS' | 'FOR_REFERRAL' | null;
+  documents?: DocumentCheckItem[];
   documents_status?: Record<string, 'Valid' | 'Incomplete' | 'Invalid'>;
   assessment_notes?: string;
   vulnerability_level?: 'HIGH' | 'MODERATE' | 'LOW' | null;
@@ -38,32 +56,13 @@ export function mapDbRecordToCaseData(row: DbCaseRecord | null | undefined, modu
     moduleType = hint.includes('vawc') ? 'women-vawc' : hint.includes('aics') ? 'aics' : 'solo-parent';
   }
 
-  // Map Documents
-  const docStatusMap = safeRow.documents_status || {};
-  let defaultDocs: DocumentCheckItem[] = [];
-  if (moduleType === 'solo-parent') {
-    defaultDocs = [
-      { id: "sp-1", name: "PSA Child Birth Certificate", status: docStatusMap["sp-1"] || docStatusMap["PSA Child Birth Certificate"] || "Valid", fileRef: "psa_birth_cert.pdf" },
-      { id: "sp-2", name: "Proof of Solo Parent Status (Death Cert/Court Order/Abandonment Affidavit)", status: docStatusMap["sp-2"] || docStatusMap["Proof of Solo Parent Status"] || "Valid", fileRef: "proof_solo_parent.pdf" },
-      { id: "sp-3", name: "Barangay Indigency/Low Income", status: docStatusMap["sp-3"] || docStatusMap["Barangay Indigency"] || "Valid", fileRef: "brgy_indigency.pdf" },
-    ];
-  } else if (moduleType === 'women-vawc') {
-    defaultDocs = [
-      { id: "w-1", name: "Valid ID", status: docStatusMap["w-1"] || docStatusMap["Valid ID"] || "Valid", fileRef: "valid_id.pdf" },
-      { id: "w-2", name: "BPO/Police Blotter", status: docStatusMap["w-2"] || docStatusMap["BPO/Police Blotter"] || "Valid", fileRef: "police_blotter.pdf" },
-      { id: "w-3", name: "Medico-Legal Report", status: docStatusMap["w-3"] || docStatusMap["Medico-Legal Report"] || "Incomplete", fileRef: "medico_legal.pdf" },
-      { id: "w-4", name: "Barangay Indigency", status: docStatusMap["w-4"] || docStatusMap["Barangay Indigency"] || "Valid", fileRef: "brgy_indigency.pdf" },
-    ];
-  } else {
-    defaultDocs = [
-      { id: "a-1", name: "Valid ID", status: docStatusMap["a-1"] || docStatusMap["Valid ID"] || "Valid", fileRef: "valid_id.pdf" },
-      { id: "a-2", name: "Indigency", status: docStatusMap["a-2"] || docStatusMap["Indigency"] || "Valid", fileRef: "brgy_indigency.pdf" },
-      { id: "a-3", name: "Hospital SOA/Bills", status: docStatusMap["a-3"] || docStatusMap["Hospital SOA/Bills"] || "Valid", fileRef: "hospital_soa.pdf" },
-      { id: "a-4", name: "Doctor's Prescription", status: docStatusMap["a-4"] || docStatusMap["Doctor's Prescription"] || "Valid", fileRef: "prescription.pdf" },
-      { id: "a-5", name: "Death Cert / Funeral Contract", status: docStatusMap["a-5"] || docStatusMap["Death Cert / Funeral Contract"] || "Incomplete", fileRef: "death_cert.pdf" },
-      { id: "a-6", name: "Transit Request", status: docStatusMap["a-6"] || docStatusMap["Transit Request"] || "Incomplete", fileRef: "transit_request.pdf" },
-    ];
-  }
+  // The API returns persisted attachments, never sample filenames.
+  const documents: DocumentCheckItem[] = Array.isArray(safeRow.documents)
+    ? safeRow.documents.map((doc: DocumentCheckItem) => ({
+        ...doc,
+        status: safeRow.documents_status?.[doc.id] || doc.status || "Incomplete",
+      }))
+    : [];
 
   // Map Vulnerability
   let vuln: "High" | "Moderate" | "Low" = "Moderate";
@@ -127,7 +126,7 @@ export function mapDbRecordToCaseData(row: DbCaseRecord | null | undefined, modu
     endorsementDate: safeRow.created_at ? new Date(safeRow.created_at).toISOString().split('T')[0] : '2026-10-01',
     endorsedBy: `Barangay Secretary (${barangayName})`,
     endorsementNotes: safeRow.assessment_notes || "Barangay endorsement and case documentation submitted for MSWD intake evaluation.",
-    documents: defaultDocs,
+    documents,
     socialAssessment: {
       intakeNotes: safeRow.assessment_notes || "Client intake interview conducted. Household socio-economic assessment documented.",
       caseStudySummary: safeRow.assessment_notes || "Social Case Study Report filed recommending municipal welfare intervention.",
@@ -275,12 +274,8 @@ export async function apiCreateWomenSoloParentCase(data: {
   status?: string;
   financialAidAmount?: number;
   notes?: string;
-}) {
-  const res = await fetch('/api/cases/women-solo-parent', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
+}, documents: IntakeDocument[] = []) {
+  const res = await fetch('/api/cases/women-solo-parent', intakeRequest(data, documents));
 
   if (!res.ok) {
     const errorJson = await res.json().catch(() => ({}));
@@ -306,12 +301,8 @@ export async function apiCreateAicsCase(data: {
   serviceProvider?: string;
   requestedAmount?: number;
   status?: string;
-}) {
-  const res = await fetch('/api/cases/aics', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
+}, documents: IntakeDocument[] = []) {
+  const res = await fetch('/api/cases/aics', intakeRequest(data, documents));
 
   if (!res.ok) {
     const errorJson = await res.json().catch(() => ({}));

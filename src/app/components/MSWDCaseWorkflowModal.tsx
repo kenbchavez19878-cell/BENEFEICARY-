@@ -164,6 +164,7 @@ export interface DocumentCheckItem {
   name: string;
   status: "Valid" | "Incomplete" | "Invalid";
   fileRef?: string;
+  fileUrl?: string;
 }
 
 export interface CaseData {
@@ -296,7 +297,7 @@ export function buildSafeCaseData(
     endorsementDate: rawItem?.endorsementDate || (rawItem?.created_at ? new Date(rawItem.created_at).toISOString().split('T')[0] : "2026-10-01"),
     endorsedBy: rawItem?.endorsedBy || `Barangay Secretary (${barangay})`,
     endorsementNotes: rawItem?.endorsementNotes || rawItem?.assessment_notes || "Applicant submitted application and supporting documents at Barangay Hall. Endorsed to MSWD for immediate case review and assistance.",
-    documents: Array.isArray(rawItem?.documents) && rawItem.documents.length > 0 ? rawItem.documents : defaultDocs,
+    documents: Array.isArray(rawItem?.documents) ? rawItem.documents : defaultDocs,
     socialAssessment: {
       intakeNotes: rawItem?.socialAssessment?.intakeNotes || rawItem?.assessment_notes || "Client appeared for intake interview. Household socio-economic assessment documented.",
       caseStudySummary: rawItem?.socialAssessment?.caseStudySummary || rawItem?.assessment_notes || "Social Case Study Report indicates client falls below indigency baseline. Recommended for program assistance.",
@@ -857,7 +858,7 @@ function MSWDCaseWorkflowModalInner({
                           <FileText className="size-3.5 text-blue-800" />
                           <div>
                             <p className="font-medium text-gray-900 text-[11px]">{doc.name}</p>
-                            <p className="text-[10px] text-gray-400 font-mono">{doc.fileRef || "scanned_copy.pdf"}</p>
+                            <p className="text-[10px] text-gray-400 font-mono">{doc.fileUrl ? <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer" aria-label={`Open ${doc.name}`}>{doc.fileRef}</a> : "No file attached"}</p>
                           </div>
                         </div>
                         <Badge className={`${
@@ -976,7 +977,7 @@ function MSWDCaseWorkflowModalInner({
                       </div>
                       <div className="text-xs">
                         <p className="font-bold text-gray-900">{doc.name}</p>
-                        <p className="text-gray-400 font-mono text-[10px]">{doc.fileRef || "scanned_doc.pdf"}</p>
+                        <p className="text-gray-400 font-mono text-[10px]">{doc.fileUrl ? <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer" aria-label={`Open ${doc.name}`}>{doc.fileRef}</a> : "No file attached"}</p>
                       </div>
                     </div>
 
