@@ -174,6 +174,21 @@ export function mapDbRecordToCaseData(row: DbCaseRecord | null | undefined, modu
   };
 }
 
+// Helper to parse DRF validation errors or standard HTTP errors into clean toast messages
+function extractErrorMessage(errorJson: any, fallback: string): string {
+  if (!errorJson) return fallback;
+  if (typeof errorJson === 'string') return errorJson;
+  if (errorJson.error) return String(errorJson.error);
+  if (errorJson.detail) return String(errorJson.detail);
+  if (errorJson.message) return String(errorJson.message);
+  for (const k of Object.keys(errorJson)) {
+    const val = errorJson[k];
+    if (Array.isArray(val) && val.length > 0) return `${k}: ${val[0]}`;
+    if (typeof val === 'string') return `${k}: ${val}`;
+  }
+  return fallback;
+}
+
 // 1. Fetch Women & Solo Parent Cases
 export async function apiGetWomenSoloParentCases(filters?: { status?: string; category?: string; search?: string; barangay?: string }) {
   const params = new URLSearchParams();
@@ -185,10 +200,12 @@ export async function apiGetWomenSoloParentCases(filters?: { status?: string; ca
   const url = `/api/cases/women-solo-parent${params.toString() ? `?${params.toString()}` : ''}`;
   const res = await fetch(url);
   if (!res.ok) {
-    throw new Error(`Failed to fetch women & solo parent cases: ${res.statusText}`);
+    const errorJson = await res.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(errorJson, `Failed to fetch women & solo parent cases: ${res.statusText}`));
   }
   const json = await res.json();
-  return json.data as DbCaseRecord[];
+  const list = Array.isArray(json.data) ? json.data : Array.isArray(json.results) ? json.results : Array.isArray(json) ? json : [];
+  return list as DbCaseRecord[];
 }
 
 // 2. Fetch AICS Cases
@@ -202,10 +219,12 @@ export async function apiGetAicsCases(filters?: { status?: string; aics_type?: s
   const url = `/api/cases/aics${params.toString() ? `?${params.toString()}` : ''}`;
   const res = await fetch(url);
   if (!res.ok) {
-    throw new Error(`Failed to fetch AICS cases: ${res.statusText}`);
+    const errorJson = await res.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(errorJson, `Failed to fetch AICS cases: ${res.statusText}`));
   }
   const json = await res.json();
-  return json.data as DbCaseRecord[];
+  const list = Array.isArray(json.data) ? json.data : Array.isArray(json.results) ? json.results : Array.isArray(json) ? json : [];
+  return list as DbCaseRecord[];
 }
 
 // 3. Fetch Case Record & Audit Log by ID
@@ -213,7 +232,8 @@ export async function apiGetCaseById(idOrCaseNumber: string | number, moduleHint
   const url = `/api/cases/${encodeURIComponent(String(idOrCaseNumber))}${moduleHint ? `?module=${encodeURIComponent(moduleHint)}` : ''}`;
   const res = await fetch(url);
   if (!res.ok) {
-    throw new Error(`Failed to fetch case ${idOrCaseNumber}: ${res.statusText}`);
+    const errorJson = await res.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(errorJson, `Failed to fetch case ${idOrCaseNumber}: ${res.statusText}`));
   }
   return await res.json();
 }
@@ -231,12 +251,12 @@ export async function apiUpdateCaseStep(idOrCaseNumber: string | number, payload
 
   if (!res.ok) {
     const errorJson = await res.json().catch(() => ({}));
-    throw new Error(errorJson.error || `Failed to update case step: ${res.statusText}`);
+    throw new Error(extractErrorMessage(errorJson, `Failed to update case step: ${res.statusText}`));
   }
 
   const json = await res.json();
   notifyDataUpdated();
-  return json.data as DbCaseRecord;
+  return (json.data || json) as DbCaseRecord;
 }
 
 // 5. Create Women & Solo Parent Case (POST /api/cases/women-solo-parent)
@@ -264,12 +284,12 @@ export async function apiCreateWomenSoloParentCase(data: {
 
   if (!res.ok) {
     const errorJson = await res.json().catch(() => ({}));
-    throw new Error(errorJson.error || `Failed to register beneficiary: ${res.statusText}`);
+    throw new Error(extractErrorMessage(errorJson, `Failed to register beneficiary: ${res.statusText}`));
   }
 
   const json = await res.json();
   notifyDataUpdated();
-  return json.data as DbCaseRecord;
+  return (json.data || json) as DbCaseRecord;
 }
 
 // 6. Create AICS Case (POST /api/cases/aics)
@@ -295,12 +315,12 @@ export async function apiCreateAicsCase(data: {
 
   if (!res.ok) {
     const errorJson = await res.json().catch(() => ({}));
-    throw new Error(errorJson.error || `Failed to register AICS intake: ${res.statusText}`);
+    throw new Error(extractErrorMessage(errorJson, `Failed to register AICS intake: ${res.statusText}`));
   }
 
   const json = await res.json();
   notifyDataUpdated();
-  return json.data as DbCaseRecord;
+  return (json.data || json) as DbCaseRecord;
 }
 
 export interface DashboardStats {

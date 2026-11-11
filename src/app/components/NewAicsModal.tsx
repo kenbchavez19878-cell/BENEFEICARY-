@@ -92,7 +92,7 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
 
     try {
       setIsSubmitting(true);
-      await apiCreateAicsCase({
+      const createdRecord = await apiCreateAicsCase({
         case_number: trackingNumber,
         fullName: fullName.trim(),
         birthDate,
@@ -107,7 +107,8 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
         status: initialStatus,
       });
 
-      toast.success(`AICS crisis intake registered successfully with Tracking ID: ${trackingNumber}`);
+      const assignedTracking = (createdRecord as any)?.tracking_id || createdRecord?.case_number || trackingNumber;
+      toast.success(`AICS crisis intake registered successfully with Tracking ID: ${assignedTracking}`);
       onSuccess();
       onClose();
     } catch (err: any) {

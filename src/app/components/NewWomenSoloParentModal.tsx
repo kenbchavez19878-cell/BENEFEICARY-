@@ -82,7 +82,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
 
     try {
       setIsSubmitting(true);
-      await apiCreateWomenSoloParentCase({
+      const createdRecord = await apiCreateWomenSoloParentCase({
         case_number: trackingNumber,
         fullName: fullName.trim(),
         birthDate,
@@ -99,7 +99,8 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
         notes: notes.trim() || undefined,
       });
 
-      toast.success(`Beneficiary profile registered successfully with Tracking ID: ${trackingNumber}`);
+      const assignedTracking = (createdRecord as any)?.tracking_id || createdRecord?.case_number || trackingNumber;
+      toast.success(`Beneficiary profile registered successfully with Tracking ID: ${assignedTracking}`);
       onSuccess();
       onClose();
     } catch (err: any) {
