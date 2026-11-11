@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { X, UserPlus, CheckCircle2, ShieldCheck, HeartHandshake, Baby, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
-import { apiCreateWomenSoloParentCase } from "../services/caseService";
+import { apiCreateWomenSoloParentCase, saveSecretarySubmittedCase } from "../services/caseService";
 
 interface NewWomenSoloParentModalProps {
   isOpen: boolean;
@@ -100,6 +100,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
       });
 
       const assignedTracking = (createdRecord as any)?.tracking_id || createdRecord?.case_number || trackingNumber;
+      saveSecretarySubmittedCase(assignedTracking);
       toast.success(`Beneficiary profile registered successfully with Tracking ID: ${assignedTracking}`);
       onSuccess();
       onClose();

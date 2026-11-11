@@ -18,11 +18,24 @@ function figmaAssetResolver() {
 export default defineConfig({
   server: {
     port: 5173,
+    host: true, // Listen on all network addresses (both localhost and 127.0.0.1)
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false,
+        configure: (proxy) => {
+          proxy.on('error', (err, _req, res: any) => {
+            console.warn('[Vite Proxy Warning] Django backend unreachable at http://127.0.0.1:8000:', (err as any).message);
+            if (res && !res.headersSent && typeof res.writeHead === 'function') {
+              res.writeHead(503, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                success: false,
+                error: 'Backend service unavailable. Please ensure Django is running on port 8000 (cd backend && python manage.py runserver).',
+              }));
+            }
+          });
+        },
       },
       '/admin': {
         target: 'http://127.0.0.1:8000',

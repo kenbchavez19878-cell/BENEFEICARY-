@@ -374,3 +374,53 @@ export function subscribeDataUpdated(callback: () => void) {
   };
 }
 
+// 9. Session-based submitted cases tracking for Secretary intake
+export function getSecretarySubmittedCases(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = sessionStorage.getItem('benefitrack_submitted_cases');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveSecretarySubmittedCase(caseNumber: string) {
+  if (typeof window === 'undefined' || !caseNumber) return;
+  try {
+    const list = getSecretarySubmittedCases();
+    if (!list.includes(caseNumber)) {
+      list.push(caseNumber);
+      sessionStorage.setItem('benefitrack_submitted_cases', JSON.stringify(list));
+    }
+  } catch {}
+}
+
+// 10. Role checking helpers
+export function isSecretaryRole(role?: string): boolean {
+  let r = (role || "").trim().toLowerCase().replace(/[\s_]+/g, '');
+  if (!r && typeof window !== 'undefined') {
+    const stored = (sessionStorage.getItem('benefitrack_active_role') || '').trim().toLowerCase().replace(/[\s_]+/g, '');
+    r = stored;
+  }
+  if (!r) return false;
+  return (
+    r.includes('secretary') ||
+    r.includes('barangay') ||
+    r.includes('frontline') ||
+    r.includes('intake')
+  );
+}
+
+export function isStaffRole(role?: string): boolean {
+  if (!role) return false;
+  const r = role.trim().toLowerCase().replace(/[\s_]+/g, '');
+  return (
+    r === 'staff' ||
+    r === 'validator' ||
+    r === 'mswdstaff' ||
+    r === 'socialworker' ||
+    r === 'mswdofficer'
+  );
+}
+

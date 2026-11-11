@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { toast } from "sonner";
-import { apiUpdateCaseStep, apiGetCaseById, mapDbRecordToCaseData } from "../services/caseService";
+import { apiUpdateCaseStep, apiGetCaseById, mapDbRecordToCaseData, isSecretaryRole } from "../services/caseService";
 import {
   FileText,
   FileCheck,
@@ -218,6 +218,8 @@ export interface MSWDCaseWorkflowModalProps {
   caseItem?: Partial<CaseData> | any;
   moduleType?: "solo-parent" | "women-vawc" | "aics" | "WOMEN_SOLO_PARENT" | string;
   onUpdateCase?: (updated: CaseData) => void;
+  userRole?: string;
+  isReadOnly?: boolean;
 }
 
 const DEFAULT_SOLO_PARENT_DOCS: DocumentCheckItem[] = [
@@ -435,11 +437,17 @@ function MSWDCaseWorkflowModalInner({
   caseItem,
   moduleType: moduleTypeProp,
   onUpdateCase,
+  userRole,
+  isReadOnly = false,
 }: MSWDCaseWorkflowModalProps) {
+  const effectiveRole = userRole || (typeof window !== "undefined" ? sessionStorage.getItem("benefitrack_active_role") || "" : "");
+  const isSecretary = isSecretaryRole(effectiveRole) || Boolean(isReadOnly);
+  const isValidator = !isSecretary;
   const effectiveModuleType = normalizeModuleType(moduleTypeProp || caseItem?.moduleType || "solo-parent");
   const moduleType = effectiveModuleType;
 
   const [currentStep, setCurrentStep] = useState<number>(1);
+  const activeStep = isSecretary ? 1 : currentStep;
 
   // Preview modals
   const [showSpicPreviewModal, setShowSpicPreviewModal] = useState(false);
@@ -645,6 +653,15 @@ function MSWDCaseWorkflowModalInner({
                   ? "Women / VAWC Assistance"
                   : "AICS Crisis Assistance"}
               </Badge>
+              {isSecretary ? (
+                <Badge className="bg-amber-500/20 text-amber-200 border border-amber-400/40 text-[10px] uppercase tracking-wider font-semibold">
+                  Frontline Intake View (Read-Only)
+                </Badge>
+              ) : (
+                <Badge className="bg-indigo-500/20 text-indigo-200 border border-indigo-400/40 text-[10px] uppercase tracking-wider font-semibold">
+                  Staff Case Validator
+                </Badge>
+              )}
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/70 text-emerald-200 border border-emerald-500/40 shadow-xs">
                 <span className={`size-1.5 rounded-full ${dbSyncStatus === 'saving' ? 'bg-amber-400 animate-ping' : dbSyncStatus === 'error' ? 'bg-red-400' : 'bg-emerald-400 animate-pulse'}`} />
                 {dbSyncStatus === 'saving' ? 'Saving to PostgreSQL...' : dbSyncStatus === 'error' ? 'Database Offline' : 'PostgreSQL Connected'}
@@ -668,53 +685,73 @@ function MSWDCaseWorkflowModalInner({
           </button>
         </div>
 
-        {/* ── 8-STEP WORKFLOW STEPPER BAR ── */}
-        <div className="bg-gray-50 border-b border-gray-200 px-4 py-3 flex-shrink-0 overflow-x-auto custom-scrollbar">
-          <div className="flex items-center justify-between min-w-[760px] gap-1">
-            {STEPS.map((step) => {
-              const Icon = step.icon;
-              const isActive = currentStep === step.num;
-              const isCompleted = currentStep > step.num;
-              const isStep5Locked = step.num === 5 && !isEligibilityUnlocked;
+        {/* ── WORKFLOW STEPPER BAR / READ-ONLY INTAKE BANNER ── */}
+        {!isSecretary ? (
+          <div className="bg-gray-50 border-b border-gray-200 px-4 py-3 flex-shrink-0 overflow-x-auto custom-scrollbar">
+            <div className="flex items-center justify-between min-w-[760px] gap-1">
+              {STEPS.map((step) => {
+                const Icon = step.icon;
+                const isActive = activeStep === step.num;
+                const isCompleted = activeStep > step.num;
+                const isStep5Locked = step.num === 5 && !isEligibilityUnlocked;
 
-              return (
-                <button
-                  key={step.num}
-                  disabled={isStep5Locked && currentStep < 5}
-                  onClick={() => setCurrentStep(step.num)}
-                  className={`flex flex-col items-center p-1.5 rounded-xl transition-all relative group flex-1 ${
-                    isActive
-                      ? "bg-blue-900 text-white shadow-sm scale-[1.02]"
-                      : isCompleted
-                      ? "bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
-                      : isStep5Locked && currentStep < 5
-                      ? "bg-gray-100 text-gray-400 border border-gray-200 opacity-60 cursor-not-allowed"
-                      : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-100"
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <div
-                      className={`size-6 rounded-full text-xs font-bold flex items-center justify-center ${
-                        isActive
-                          ? "bg-white text-blue-900"
-                          : isCompleted
-                          ? "bg-emerald-600 text-white"
-                          : isStep5Locked && currentStep < 5
-                          ? "bg-gray-200 text-gray-400"
-                          : "bg-gray-200 text-gray-700"
-                      }`}
-                    >
-                      {isCompleted ? <Check className="size-3.5" /> : step.num}
+                return (
+                  <button
+                    key={step.num}
+                    disabled={isStep5Locked && activeStep < 5}
+                    onClick={() => setCurrentStep(step.num)}
+                    className={`flex flex-col items-center p-1.5 rounded-xl transition-all relative group flex-1 ${
+                      isActive
+                        ? "bg-blue-900 text-white shadow-sm scale-[1.02]"
+                        : isCompleted
+                        ? "bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
+                        : isStep5Locked && activeStep < 5
+                        ? "bg-gray-100 text-gray-400 border border-gray-200 opacity-60 cursor-not-allowed"
+                        : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-100"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <div
+                        className={`size-6 rounded-full text-xs font-bold flex items-center justify-center ${
+                          isActive
+                            ? "bg-white text-blue-900"
+                            : isCompleted
+                            ? "bg-emerald-600 text-white"
+                            : isStep5Locked && activeStep < 5
+                            ? "bg-gray-200 text-gray-400"
+                            : "bg-gray-200 text-gray-700"
+                        }`}
+                      >
+                        {isCompleted ? <Check className="size-3.5" /> : step.num}
+                      </div>
+                      <Icon className="size-4" />
                     </div>
-                    <Icon className="size-4" />
-                  </div>
-                  <span className="text-[11px] font-bold truncate max-w-[90px]">{step.title}</span>
-                  <span className="text-[9px] opacity-75 truncate max-w-[90px]">{step.desc}</span>
-                </button>
-              );
-            })}
+                    <span className="text-[11px] font-bold truncate max-w-[90px]">{step.title}</span>
+                    <span className="text-[9px] opacity-75 truncate max-w-[90px]">{step.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="bg-slate-50 border-b border-gray-200 px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
+            <div className="flex items-center gap-2.5">
+              <span className="size-6 rounded-full bg-blue-900 text-white text-xs font-bold flex items-center justify-center">
+                1
+              </span>
+              <div>
+                <p className="text-xs font-bold text-gray-900">Submitted Intake Details &amp; Endorsement Record</p>
+                <p className="text-[11px] text-gray-500">Read-Only View &bull; 8-Step Validation Process Managed by MSWD Staff</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-gray-500">Processing Status:</span>
+              <Badge className={`${currentStatusConfig.bg} ${currentStatusConfig.text} ${currentStatusConfig.border} border text-[11px] font-bold px-2.5 py-0.5`}>
+                {currentStatusConfig.label}
+              </Badge>
+            </div>
+          </div>
+        )}
 
         {/* ── MAIN MODAL CONTENT BODY ── */}
         <div className="p-6 flex-1 overflow-y-auto space-y-6 bg-white relative">
@@ -730,14 +767,14 @@ function MSWDCaseWorkflowModalInner({
             </div>
           )}
           
-          {/* ═════ STEP 1: ENDORSEMENT REVIEW ═════ */}
-          {currentStep === 1 && (
+          {/* ═════ STEP 1: ENDORSEMENT & INTAKE REVIEW ═════ */}
+          {(activeStep === 1 || isSecretary) && (
             <div className="space-y-5">
               <div className="flex items-center justify-between border-b border-gray-200 pb-3">
                 <div className="flex items-center gap-2">
                   <Building className="size-5 text-blue-800" />
                   <h3 className="text-base font-extrabold text-blue-950">
-                    Step 1: Barangay Endorsement Review
+                    Step 1: Barangay Endorsement &amp; Intake Review
                   </h3>
                 </div>
                 <Badge className="bg-blue-100 text-blue-800 border-blue-200 font-semibold">
@@ -772,6 +809,72 @@ function MSWDCaseWorkflowModalInner({
                 </Card>
               </div>
 
+              {/* Submitted Applicant & Intake Details Section */}
+              <div className="p-4 bg-white border border-gray-200 rounded-xl space-y-3 shadow-2xs">
+                <p className="text-xs font-bold text-gray-900 uppercase tracking-wider">
+                  Submitted Applicant &amp; Intake Details
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                  <div>
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Beneficiary Name</span>
+                    <p className="font-bold text-gray-900 text-sm">{caseState.beneficiaryName}</p>
+                    <p className="text-[11px] text-gray-500 font-mono">{caseState.trackingId}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Program / Sector</span>
+                    <p className="font-bold text-blue-900">
+                      {moduleType === "solo-parent"
+                        ? "Solo Parent Program"
+                        : moduleType === "women-vawc"
+                        ? "Women / VAWC Support"
+                        : "AICS Crisis Assistance"}
+                    </p>
+                    <p className="text-[11px] text-gray-500">{caseState.barangay}, Calabanga</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Financial Aid Requested</span>
+                    <p className="font-bold text-emerald-700 text-sm">
+                      ₱{(Number(caseState.servicePlan?.approvedFinancialAmount || caseState.servicePlan?.emergencyCashAidAmount) || 3000).toLocaleString()}
+                    </p>
+                    <p className="text-[11px] text-gray-500">Municipal Standard Baseline</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Submitted Documents</span>
+                    <p className="font-bold text-gray-800">
+                      {(caseState.documents || []).length} Document(s) Attached
+                    </p>
+                    <p className="text-[11px] text-gray-500">Encoded for MSWD Verification</p>
+                  </div>
+                </div>
+
+                {/* Scanned/Submitted Document List */}
+                <div className="pt-2 border-t border-gray-100">
+                  <span className="text-[10px] text-gray-400 uppercase font-semibold">Attached Requirement Checklist:</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                    {(caseState.documents || []).map((doc) => (
+                      <div key={doc.id} className="p-2.5 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <FileText className="size-3.5 text-blue-800" />
+                          <div>
+                            <p className="font-medium text-gray-900 text-[11px]">{doc.name}</p>
+                            <p className="text-[10px] text-gray-400 font-mono">{doc.fileRef || "scanned_copy.pdf"}</p>
+                          </div>
+                        </div>
+                        <Badge className={`${
+                          doc.status === "Valid"
+                            ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+                            : doc.status === "Invalid"
+                            ? "bg-red-100 text-red-800 border-red-200"
+                            : "bg-amber-100 text-amber-800 border-amber-200"
+                        } text-[10px] font-semibold`}>
+                          {doc.status}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
               {/* Initial Notes Read-Only */}
               <div className="space-y-1.5 text-xs">
                 <label className="font-bold text-gray-800">Initial Endorsement Notes</label>
@@ -787,29 +890,38 @@ function MSWDCaseWorkflowModalInner({
                     <Clock className="size-5" />
                   </div>
                   <div className="text-xs">
-                    <p className="font-bold text-blue-950 text-sm">Acknowledge & Start Review</p>
+                    <p className="font-bold text-blue-950 text-sm">
+                      {isSecretary ? "Applicant Intake Encoded & Endorsed" : "Acknowledge & Start Review"}
+                    </p>
                     <p className="text-blue-800">
-                      Update local case status from <span className="font-mono font-bold">BARANGAY_ENDORSED</span> to{" "}
-                      <span className="font-mono font-bold">UNDER_REVIEW</span> and advance to Step 2.
+                      {isSecretary
+                        ? "Case record is officially encoded in PostgreSQL and is under review by MSWD Social Welfare Officers."
+                        : <>Update local case status from <span className="font-mono font-bold">BARANGAY_ENDORSED</span> to <span className="font-mono font-bold">UNDER_REVIEW</span> and advance to Step 2.</>}
                     </p>
                   </div>
                 </div>
 
-                <Button
-                  onClick={async () => {
-                    await updateStatus("UNDER_REVIEW", "Endorsement acknowledged. Case is now under review in PostgreSQL database.", 1);
-                    setCurrentStep(2);
-                  }}
-                  className="bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold px-5 py-2.5 shadow-sm whitespace-nowrap"
-                >
-                  Acknowledge & Start Review →
-                </Button>
+                {!isSecretary ? (
+                  <Button
+                    onClick={async () => {
+                      await updateStatus("UNDER_REVIEW", "Endorsement acknowledged. Case is now under review in PostgreSQL database.", 1);
+                      setCurrentStep(2);
+                    }}
+                    className="bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold px-5 py-2.5 shadow-sm whitespace-nowrap"
+                  >
+                    Acknowledge & Start Review →
+                  </Button>
+                ) : (
+                  <Badge className="bg-amber-100 text-amber-900 border border-amber-300 text-xs px-3 py-1.5 whitespace-nowrap font-bold">
+                    Pending MSWD Staff Action
+                  </Badge>
+                )}
               </div>
             </div>
           )}
 
           {/* ═════ STEP 2: DOCUMENT VERIFICATION ═════ */}
-          {currentStep === 2 && (
+          {!isSecretary && activeStep === 2 && (
             <div className="space-y-5">
               <div className="flex items-center justify-between border-b border-gray-200 pb-3">
                 <div className="flex items-center gap-2">
@@ -869,43 +981,59 @@ function MSWDCaseWorkflowModalInner({
                     </div>
 
                     {/* Toggle Switches for Valid / Incomplete / Invalid */}
-                    <div className="flex items-center gap-1.5 self-end sm:self-center">
-                      <button
-                        type="button"
-                        onClick={() => handleDocToggle(doc.id, "Valid")}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 ${
-                          doc.status === "Valid"
-                            ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
-                            : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-emerald-50 hover:text-emerald-700"
-                        }`}
-                      >
-                        <Check className="size-3.5" /> Valid
-                      </button>
+                    {isSecretary ? (
+                      <div className="flex items-center gap-1.5 self-end sm:self-center">
+                        <span
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                            doc.status === "Valid"
+                              ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                              : doc.status === "Invalid"
+                              ? "bg-red-100 text-red-800 border border-red-200"
+                              : "bg-amber-100 text-amber-800 border border-amber-200"
+                          }`}
+                        >
+                          {doc.status}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 self-end sm:self-center">
+                        <button
+                          type="button"
+                          onClick={() => handleDocToggle(doc.id, "Valid")}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 ${
+                            doc.status === "Valid"
+                              ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
+                              : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-emerald-50 hover:text-emerald-700"
+                          }`}
+                        >
+                          <Check className="size-3.5" /> Valid
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDocToggle(doc.id, "Incomplete")}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 ${
-                          doc.status === "Incomplete"
-                            ? "bg-amber-600 text-white border-amber-600 shadow-xs"
-                            : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-amber-50 hover:text-amber-700"
-                        }`}
-                      >
-                        <AlertTriangle className="size-3.5" /> Incomplete
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDocToggle(doc.id, "Incomplete")}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 ${
+                            doc.status === "Incomplete"
+                              ? "bg-amber-600 text-white border-amber-600 shadow-xs"
+                              : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-amber-50 hover:text-amber-700"
+                          }`}
+                        >
+                          <AlertTriangle className="size-3.5" /> Incomplete
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDocToggle(doc.id, "Invalid")}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 ${
-                          doc.status === "Invalid"
-                            ? "bg-red-600 text-white border-red-600 shadow-xs"
-                            : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-red-50 hover:text-red-700"
-                        }`}
-                      >
-                        <X className="size-3.5" /> Invalid
-                      </button>
-                    </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDocToggle(doc.id, "Invalid")}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 ${
+                            doc.status === "Invalid"
+                              ? "bg-red-600 text-white border-red-600 shadow-xs"
+                              : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-red-50 hover:text-red-700"
+                          }`}
+                        >
+                          <X className="size-3.5" /> Invalid
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -921,50 +1049,54 @@ function MSWDCaseWorkflowModalInner({
                       : "Pending completion of all requirements"}
                   </p>
                   <p className="text-gray-500">
-                    {allDocsValid
+                    {isSecretary
+                      ? "Document verification and validation is managed by MSWD Social Welfare Officers."
+                      : allDocsValid
                       ? "You may now advance to Social Worker Assessment in Step 3."
                       : "Check all items as 'Valid' to unlock Step 3, or return for correction if documents are invalid."}
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  {/* Shown if any document is marked Invalid */}
-                  {hasInvalidDocs && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={async () => {
-                        await updateStatus("RETURNED_FOR_CORRECTION", "Documents evaluated as invalid. Case returned to Barangay for correction in PostgreSQL.", 2);
-                        toast.error("Case Marked as RETURNED_FOR_CORRECTION in PostgreSQL");
-                      }}
-                      className="border-red-300 bg-red-50 text-red-700 hover:bg-red-100 text-xs font-bold"
-                    >
-                      <Undo2 className="size-3.5 mr-1" /> Return for Correction
-                    </Button>
-                  )}
+                {!isSecretary && (
+                  <div className="flex items-center gap-2">
+                    {/* Shown if any document is marked Invalid */}
+                    {hasInvalidDocs && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={async () => {
+                          await updateStatus("RETURNED_FOR_CORRECTION", "Documents evaluated as invalid. Case returned to Barangay for correction in PostgreSQL.", 2);
+                          toast.error("Case Marked as RETURNED_FOR_CORRECTION in PostgreSQL");
+                        }}
+                        className="border-red-300 bg-red-50 text-red-700 hover:bg-red-100 text-xs font-bold"
+                      >
+                        <Undo2 className="size-3.5 mr-1" /> Return for Correction
+                      </Button>
+                    )}
 
-                  {/* Move to Step 3 - ONLY ENABLED IF all docs are marked Valid */}
-                  <Button
-                    disabled={!allDocsValid}
-                    onClick={async () => {
-                      await updateStatus("IN_ASSESSMENT", "Document verification complete. Case moved to in-depth assessment in PostgreSQL.", 2);
-                      setCurrentStep(3);
-                    }}
-                    className={`text-xs font-bold px-5 py-2.5 ${
-                      allDocsValid
-                        ? "bg-purple-900 hover:bg-purple-800 text-white shadow-sm"
-                        : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                    }`}
-                  >
-                    Move to Step 3 →
-                  </Button>
-                </div>
+                    {/* Move to Step 3 - ONLY ENABLED IF all docs are marked Valid */}
+                    <Button
+                      disabled={!allDocsValid}
+                      onClick={async () => {
+                        await updateStatus("IN_ASSESSMENT", "Document verification complete. Case moved to in-depth assessment in PostgreSQL.", 2);
+                        setCurrentStep(3);
+                      }}
+                      className={`text-xs font-bold px-5 py-2.5 ${
+                        allDocsValid
+                          ? "bg-purple-900 hover:bg-purple-800 text-white shadow-sm"
+                          : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      }`}
+                    >
+                      Move to Step 3 →
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           )}
 
           {/* ═════ STEP 3: SOCIAL WORKER ASSESSMENT ═════ */}
-          {currentStep === 3 && (
+          {!isSecretary && activeStep === 3 && (
             <div className="space-y-5">
               <div className="flex items-center justify-between border-b border-gray-200 pb-3">
                 <div className="flex items-center gap-2">
@@ -1025,6 +1157,7 @@ function MSWDCaseWorkflowModalInner({
                 </label>
                 <textarea
                   rows={3}
+                  readOnly={isSecretary}
                   value={caseState.socialAssessment.intakeNotes}
                   onChange={(e) =>
                     setCaseState({
@@ -1046,6 +1179,7 @@ function MSWDCaseWorkflowModalInner({
                 </label>
                 <textarea
                   rows={3}
+                  readOnly={isSecretary}
                   value={caseState.socialAssessment.caseStudySummary}
                   onChange={(e) =>
                     setCaseState({
@@ -1064,34 +1198,44 @@ function MSWDCaseWorkflowModalInner({
               <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-xl flex items-center justify-between">
                 <div className="text-xs space-y-0.5">
                   <p className="font-bold text-indigo-950">Persist Assessment Notes & Advance</p>
-                  <p className="text-indigo-800">Saves social case study and intake assessment directly to PostgreSQL.</p>
+                  <p className="text-indigo-800">
+                    {isSecretary
+                      ? "Social assessment and case study notes are conducted by MSWD staff."
+                      : "Saves social case study and intake assessment directly to PostgreSQL."}
+                  </p>
                 </div>
 
-                <Button
-                  onClick={async () => {
-                    const combinedNotes = [
-                      caseState.socialAssessment.intakeNotes ? `Intake: ${caseState.socialAssessment.intakeNotes}` : null,
-                      caseState.socialAssessment.caseStudySummary ? `Assessment: ${caseState.socialAssessment.caseStudySummary}` : null,
-                    ].filter(Boolean).join('\n\n');
+                {!isSecretary ? (
+                  <Button
+                    onClick={async () => {
+                      const combinedNotes = [
+                        caseState.socialAssessment.intakeNotes ? `Intake: ${caseState.socialAssessment.intakeNotes}` : null,
+                        caseState.socialAssessment.caseStudySummary ? `Assessment: ${caseState.socialAssessment.caseStudySummary}` : null,
+                      ].filter(Boolean).join('\n\n');
 
-                    await persistStepData(3, {
-                      assessment_notes: combinedNotes,
-                      vulnerability_level: (caseState.socialAssessment?.vulnerabilityLevel || "HIGH").toUpperCase(),
-                      socialAssessment: caseState.socialAssessment,
-                    });
-                    toast.success("Social assessment notes persisted to PostgreSQL database!");
-                    setCurrentStep(4);
-                  }}
-                  className="bg-indigo-900 hover:bg-indigo-800 text-white text-xs font-bold px-5 py-2.5 shadow-sm"
-                >
-                  Save & Advance to Step 4 →
-                </Button>
+                      await persistStepData(3, {
+                        assessment_notes: combinedNotes,
+                        vulnerability_level: (caseState.socialAssessment?.vulnerabilityLevel || "HIGH").toUpperCase(),
+                        socialAssessment: caseState.socialAssessment,
+                      });
+                      toast.success("Social assessment notes persisted to PostgreSQL database!");
+                      setCurrentStep(4);
+                    }}
+                    className="bg-indigo-900 hover:bg-indigo-800 text-white text-xs font-bold px-5 py-2.5 shadow-sm"
+                  >
+                    Save & Advance to Step 4 →
+                  </Button>
+                ) : (
+                  <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 text-xs px-3 py-1.5">
+                    Assessment Managed by MSWD Social Worker
+                  </Badge>
+                )}
               </div>
             </div>
           )}
 
           {/* ═════ STEP 4: ELIGIBILITY DETERMINATION ═════ */}
-          {currentStep === 4 && (
+          {!isSecretary && activeStep === 4 && (
             <div className="space-y-5">
               <div className="flex items-center justify-between border-b border-gray-200 pb-3">
                 <div className="flex items-center gap-2">
@@ -1109,59 +1253,71 @@ function MSWDCaseWorkflowModalInner({
                 <label className="font-bold text-gray-800">
                   Eligibility Determination Selector (Click to Select):
                 </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {[
-                    { key: "Eligible", label: "Eligible", color: "bg-emerald-600 text-white border-emerald-600", icon: CheckCircle2, desc: "Qualifies for full program package" },
-                    { key: "Not Eligible", label: "Not Eligible", color: "bg-red-600 text-white border-red-600", icon: AlertCircle, desc: "Exceeds income or criteria baseline" },
-                    { key: "Additional Requirements Needed", label: "Additional Reqs Needed", color: "bg-amber-600 text-white border-amber-600", icon: AlertTriangle, desc: "Pending supplementary documents" },
-                    { key: "For Referral", label: "For Referral", color: "bg-purple-600 text-white border-purple-600", icon: Send, desc: "Refer to external specialized agency" },
-                  ].map((item) => {
-                    const Icon = item.icon;
-                    const isSelected = caseState.eligibility?.status === item.key;
+                {isSecretary ? (
+                  <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500">Eligibility Status</p>
+                      <p className="text-sm font-bold text-gray-900">{caseState.eligibility?.status || "Pending Determination"}</p>
+                      <p className="text-[11px] text-gray-500 mt-0.5">Eligibility assessment is determined by authorized MSWD social workers.</p>
+                    </div>
+                    <Badge className="bg-blue-100 text-blue-800 border-blue-200">MSWD Validator Evaluated</Badge>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      { key: "Eligible", label: "Eligible", color: "bg-emerald-600 text-white border-emerald-600", icon: CheckCircle2, desc: "Qualifies for full program package" },
+                      { key: "Not Eligible", label: "Not Eligible", color: "bg-red-600 text-white border-red-600", icon: AlertCircle, desc: "Exceeds income or criteria baseline" },
+                      { key: "Additional Requirements Needed", label: "Additional Reqs Needed", color: "bg-amber-600 text-white border-amber-600", icon: AlertTriangle, desc: "Pending supplementary documents" },
+                      { key: "For Referral", label: "For Referral", color: "bg-purple-600 text-white border-purple-600", icon: Send, desc: "Refer to external specialized agency" },
+                    ].map((item) => {
+                      const Icon = item.icon;
+                      const isSelected = caseState.eligibility?.status === item.key;
 
-                    return (
-                      <button
-                        key={item.key}
-                        type="button"
-                        onClick={async () => {
-                          const updated = {
-                            ...caseState,
-                            eligibility: {
-                              ...caseState.eligibility,
-                              status: item.key as any,
-                            },
-                          };
-                          setCaseState(updated);
-                          await persistStepData(4, {
-                            eligibility: item.key,
-                            status: 'ELIGIBILITY_EVALUATED',
-                            notes: caseState.eligibility?.notes || "",
-                          });
-                          if (item.key === "Eligible") {
-                            toast.success("Client marked Eligible & saved to PostgreSQL — Step 5 unlocked!");
-                          } else {
-                            toast.warning(`Eligibility saved to PostgreSQL: ${item.key}`);
-                          }
-                        }}
-                        className={`p-3.5 rounded-xl border text-xs font-bold flex flex-col items-center text-center gap-2 transition-all cursor-pointer ${
-                          isSelected
-                            ? `${item.color} shadow-md scale-[1.02]`
-                            : "bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100"
-                        }`}
-                      >
-                        <Icon className="size-5" />
-                        <span className="font-extrabold">{item.label}</span>
-                        <span className="text-[10px] font-normal opacity-85 leading-tight">{item.desc}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={async () => {
+                            const updated = {
+                              ...caseState,
+                              eligibility: {
+                                ...caseState.eligibility,
+                                status: item.key as any,
+                              },
+                            };
+                            setCaseState(updated);
+                            await persistStepData(4, {
+                              eligibility: item.key,
+                              status: 'ELIGIBILITY_EVALUATED',
+                              notes: caseState.eligibility?.notes || "",
+                            });
+                            if (item.key === "Eligible") {
+                              toast.success("Client marked Eligible & saved to PostgreSQL — Step 5 unlocked!");
+                            } else {
+                              toast.warning(`Eligibility saved to PostgreSQL: ${item.key}`);
+                            }
+                          }}
+                          className={`p-3.5 rounded-xl border text-xs font-bold flex flex-col items-center text-center gap-2 transition-all cursor-pointer ${
+                            isSelected
+                              ? `${item.color} shadow-md scale-[1.02]`
+                              : "bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100"
+                          }`}
+                        >
+                          <Icon className="size-5" />
+                          <span className="font-extrabold">{item.label}</span>
+                          <span className="text-[10px] font-normal opacity-85 leading-tight">{item.desc}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1.5 text-xs">
                 <label className="font-bold text-gray-800">Evaluation Notes & Justification</label>
                 <textarea
                   rows={3}
+                  readOnly={isSecretary}
                   value={caseState.eligibility?.notes || ""}
                   onChange={(e) =>
                     setCaseState({
@@ -1188,32 +1344,36 @@ function MSWDCaseWorkflowModalInner({
                       : "⚠️ Step 5 Locked: Requires 'Eligible' Determination"}
                   </p>
                   <p className="text-[11px] opacity-80">
-                    {isEligibilityUnlocked
+                    {isSecretary
+                      ? "Eligibility determination is processed by authorized MSWD Social Welfare Officers."
+                      : isEligibilityUnlocked
                       ? "Transition status to ELIGIBILITY_EVALUATED and proceed to assistance package design."
                       : "Select 'Eligible' above to formulate a service plan and SPIC/AICS financial release."}
                   </p>
                 </div>
 
-                <Button
-                  disabled={!isEligibilityUnlocked}
-                  onClick={() => {
-                    updateStatus("ELIGIBILITY_EVALUATED", "Eligibility evaluation confirmed. Service planning initiated.");
-                    setCurrentStep(5);
-                  }}
-                  className={`text-xs font-bold px-5 py-2.5 ${
-                    isEligibilityUnlocked
-                      ? "bg-emerald-900 hover:bg-emerald-800 text-white shadow-sm"
-                      : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                  }`}
-                >
-                  Proceed to Step 5 (Service Planning) →
-                </Button>
+                {!isSecretary && (
+                  <Button
+                    disabled={!isEligibilityUnlocked}
+                    onClick={() => {
+                      updateStatus("ELIGIBILITY_EVALUATED", "Eligibility evaluation confirmed. Service planning initiated.");
+                      setCurrentStep(5);
+                    }}
+                    className={`text-xs font-bold px-5 py-2.5 ${
+                      isEligibilityUnlocked
+                        ? "bg-emerald-900 hover:bg-emerald-800 text-white shadow-sm"
+                        : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    }`}
+                  >
+                    Proceed to Service Plan Formulation (Step 5) →
+                  </Button>
+                )}
               </div>
             </div>
           )}
 
           {/* ═════ STEP 5: SERVICE PLANNING ═════ */}
-          {currentStep === 5 && (
+          {!isSecretary && activeStep === 5 && (
             <div className="space-y-5">
               <div className="flex items-center justify-between border-b border-gray-200 pb-3">
                 <div className="flex items-center gap-2">
@@ -1438,31 +1598,37 @@ function MSWDCaseWorkflowModalInner({
                   </p>
                 </div>
 
-                <Button
-                  onClick={async () => {
-                    await persistStepData(5, {
-                      status: "APPROVED_FOR_RELEASE",
-                      spic_number: caseState.servicePlan?.spicNumber || null,
-                      booklet_number: caseState.servicePlan?.purchaseBookletNumber || null,
-                      financial_aid_amount: caseState.servicePlan?.emergencyCashAidAmount || 0,
-                      approved_amount: caseState.servicePlan?.approvedFinancialAmount || 0,
-                      referrals: Array.isArray(caseState.servicePlan?.referrals) ? caseState.servicePlan.referrals : [],
-                      crisisType: caseState.servicePlan?.crisisType || "Medical",
-                      servicePlan: caseState.servicePlan,
-                    });
-                    await updateStatus("APPROVED_FOR_RELEASE", "Service plan formulated and approved for financial release in PostgreSQL database.", 5);
-                    setCurrentStep(6);
-                  }}
-                  className="bg-emerald-900 hover:bg-emerald-800 text-white text-xs font-bold px-5 py-2.5 shadow-sm"
-                >
-                  Confirm & Move to Step 6 →
-                </Button>
+                {!isSecretary ? (
+                  <Button
+                    onClick={async () => {
+                      await persistStepData(5, {
+                        status: "APPROVED_FOR_RELEASE",
+                        spic_number: caseState.servicePlan?.spicNumber || null,
+                        booklet_number: caseState.servicePlan?.purchaseBookletNumber || null,
+                        financial_aid_amount: caseState.servicePlan?.emergencyCashAidAmount || 0,
+                        approved_amount: caseState.servicePlan?.approvedFinancialAmount || 0,
+                        referrals: Array.isArray(caseState.servicePlan?.referrals) ? caseState.servicePlan.referrals : [],
+                        crisisType: caseState.servicePlan?.crisisType || "Medical",
+                        servicePlan: caseState.servicePlan,
+                      });
+                      await updateStatus("APPROVED_FOR_RELEASE", "Service plan formulated and approved for financial release in PostgreSQL database.", 5);
+                      setCurrentStep(6);
+                    }}
+                    className="bg-emerald-900 hover:bg-emerald-800 text-white text-xs font-bold px-5 py-2.5 shadow-sm"
+                  >
+                    Confirm & Move to Step 6 →
+                  </Button>
+                ) : (
+                  <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-xs px-3 py-1.5">
+                    Service Plan Formulated by MSWD Staff
+                  </Badge>
+                )}
               </div>
             </div>
           )}
 
           {/* ═════ STEP 6: SERVICE PROVISION & RELEASE ═════ */}
-          {currentStep === 6 && (
+          {!isSecretary && activeStep === 6 && (
             <div className="space-y-5">
               <div className="flex items-center justify-between border-b border-gray-200 pb-3">
                 <div className="flex items-center gap-2">
@@ -1582,29 +1748,35 @@ function MSWDCaseWorkflowModalInner({
                   </p>
                 </div>
 
-                <Button
-                  onClick={async () => {
-                    await persistStepData(6, {
-                      status: "RELEASED_COMPLETED",
-                      serviceRelease: caseState.serviceRelease,
-                      release_method: caseState.serviceRelease?.releaseMethod || "Cash Payout",
-                      guarantee_letter_number: caseState.serviceRelease?.guaranteeLetterNumber || null,
-                      payout_date: caseState.serviceRelease?.payoutDate || null,
-                      approved_amount: caseState.serviceRelease?.approvedAmount || 0,
-                    });
-                    await updateStatus("RELEASED_COMPLETED", "Financial aid and official credentials recorded as RELEASED_COMPLETED in PostgreSQL database.", 6);
-                    setCurrentStep(7);
-                  }}
-                  className="bg-green-700 hover:bg-green-800 text-white text-xs font-bold px-5 py-2.5 shadow-sm"
-                >
-                  Record Release & Move to Step 7 →
-                </Button>
+                {!isSecretary ? (
+                  <Button
+                    onClick={async () => {
+                      await persistStepData(6, {
+                        status: "RELEASED_COMPLETED",
+                        serviceRelease: caseState.serviceRelease,
+                        release_method: caseState.serviceRelease?.releaseMethod || "Cash Payout",
+                        guarantee_letter_number: caseState.serviceRelease?.guaranteeLetterNumber || null,
+                        payout_date: caseState.serviceRelease?.payoutDate || null,
+                        approved_amount: caseState.serviceRelease?.approvedAmount || 0,
+                      });
+                      await updateStatus("RELEASED_COMPLETED", "Financial aid and official credentials recorded as RELEASED_COMPLETED in PostgreSQL database.", 6);
+                      setCurrentStep(7);
+                    }}
+                    className="bg-green-700 hover:bg-green-800 text-white text-xs font-bold px-5 py-2.5 shadow-sm"
+                  >
+                    Record Release & Move to Step 7 →
+                  </Button>
+                ) : (
+                  <Badge className="bg-green-100 text-green-800 border-green-200 text-xs px-3 py-1.5">
+                    Assistance Release Managed by MSWD Disbursing Officer
+                  </Badge>
+                )}
               </div>
             </div>
           )}
 
           {/* ═════ STEP 7: CASE MONITORING ═════ */}
-          {currentStep === 7 && (
+          {!isSecretary && activeStep === 7 && (
             <div className="space-y-5">
               <div className="flex items-center justify-between border-b border-gray-200 pb-3">
                 <div className="flex items-center gap-2">
@@ -1619,44 +1791,50 @@ function MSWDCaseWorkflowModalInner({
               </div>
 
               {/* Form to add mock follow-up notes, home visit logs, or progress updates */}
-              <form onSubmit={handleAddTimeline} className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3 text-xs">
-                <div className="flex items-center justify-between">
-                  <p className="font-bold text-gray-900">Add Mock Follow-Up Note / Home Visit Log / Progress Update</p>
-                  <select
-                    value={newLogType}
-                    onChange={(e) => setNewLogType(e.target.value as any)}
-                    className="h-8 px-2 border border-gray-300 rounded-md bg-white text-[11px] font-semibold"
-                  >
-                    <option value="visit">Home Visit</option>
-                    <option value="update">Progress Update</option>
-                    <option value="note">General Note</option>
-                  </select>
-                </div>
+              {!isSecretary ? (
+                <form onSubmit={handleAddTimeline} className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <p className="font-bold text-gray-900">Add Follow-Up Note / Home Visit Log / Progress Update</p>
+                    <select
+                      value={newLogType}
+                      onChange={(e) => setNewLogType(e.target.value as any)}
+                      className="h-8 px-2 border border-gray-300 rounded-md bg-white text-[11px] font-semibold"
+                    >
+                      <option value="visit">Home Visit</option>
+                      <option value="update">Progress Update</option>
+                      <option value="note">General Note</option>
+                    </select>
+                  </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <input
-                    type="text"
-                    required
-                    placeholder="Log Title (e.g. 3-Month Post-Disbursement Home Visit)"
-                    value={newLogTitle}
-                    onChange={(e) => setNewLogTitle(e.target.value)}
-                    className="h-9 px-3 border border-gray-300 rounded-lg bg-white text-xs"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Progress Details (e.g. Beneficiary used cash grant for medical maintenance)"
-                    value={newLogNote}
-                    onChange={(e) => setNewLogNote(e.target.value)}
-                    className="h-9 px-3 border border-gray-300 rounded-lg bg-white text-xs"
-                  />
-                </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      required
+                      placeholder="Log Title (e.g. 3-Month Post-Disbursement Home Visit)"
+                      value={newLogTitle}
+                      onChange={(e) => setNewLogTitle(e.target.value)}
+                      className="h-9 px-3 border border-gray-300 rounded-lg bg-white text-xs"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Progress Details (e.g. Beneficiary used cash grant for medical maintenance)"
+                      value={newLogNote}
+                      onChange={(e) => setNewLogNote(e.target.value)}
+                      className="h-9 px-3 border border-gray-300 rounded-lg bg-white text-xs"
+                    />
+                  </div>
 
-                <div className="flex justify-end">
-                  <Button type="submit" size="sm" className="bg-blue-900 hover:bg-blue-800 text-white text-xs">
-                    <Plus className="size-3.5 mr-1" /> Add Monitoring Log
-                  </Button>
+                  <div className="flex justify-end">
+                    <Button type="submit" size="sm" className="bg-blue-900 hover:bg-blue-800 text-white text-xs">
+                      <Plus className="size-3.5 mr-1" /> Add Monitoring Log
+                    </Button>
+                  </div>
+                </form>
+              ) : (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+                  Case monitoring updates and field visits are conducted and recorded by MSWD Social Welfare Officers.
                 </div>
-              </form>
+              )}
 
               {/* Activity Timeline List */}
               <div className="space-y-3">
@@ -1684,18 +1862,28 @@ function MSWDCaseWorkflowModalInner({
                   <p className="text-gray-600">Review all entered data and generate official case summary.</p>
                 </div>
 
-                <Button
-                  onClick={() => setCurrentStep(8)}
-                  className="bg-gray-800 hover:bg-gray-900 text-white text-xs font-bold px-5 py-2.5"
-                >
-                  Proceed to Step 8 (Case Closure) →
-                </Button>
+                {!isSecretary ? (
+                  <Button
+                    onClick={() => setCurrentStep(8)}
+                    className="bg-gray-800 hover:bg-gray-900 text-white text-xs font-bold px-5 py-2.5"
+                  >
+                    Proceed to Step 8 (Case Closure) →
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    onClick={() => setCurrentStep(8)}
+                    className="text-xs font-semibold px-4 py-2"
+                  >
+                    View Case Summary →
+                  </Button>
+                )}
               </div>
             </div>
           )}
 
           {/* ═════ STEP 8: CASE CLOSURE ═════ */}
-          {currentStep === 8 && (
+          {!isSecretary && activeStep === 8 && (
             <div className="space-y-5">
               <div className="flex items-center justify-between border-b border-gray-200 pb-3">
                 <div className="flex items-center gap-2">
@@ -1792,6 +1980,7 @@ function MSWDCaseWorkflowModalInner({
                 <label className="font-bold text-gray-800">Final Outcome & Archiving Remarks</label>
                 <textarea
                   rows={2}
+                  readOnly={isSecretary}
                   value={caseState.closureNotes || ""}
                   onChange={(e) => setCaseState({ ...caseState, closureNotes: e.target.value })}
                   placeholder="Enter remarks for the completed case archive..."
@@ -1804,7 +1993,9 @@ function MSWDCaseWorkflowModalInner({
                 <div className="text-xs space-y-1">
                   <p className="font-bold text-sm text-white">Final Actions: Print & Close Case</p>
                   <p className="text-blue-200">
-                    Trigger browser print preview for the case study report, or mark case as COMPLETED / CLOSED.
+                    {isSecretary
+                      ? "Case study report summary preview. Official archiving is performed by MSWD validators."
+                      : "Trigger browser print preview for the case study report, or mark case as COMPLETED / CLOSED."}
                   </p>
                 </div>
 
@@ -1821,22 +2012,24 @@ function MSWDCaseWorkflowModalInner({
                     <Printer className="size-4 mr-1.5" /> Print Case Summary
                   </Button>
 
-                  {/* Close Case Button */}
-                  <Button
-                    type="button"
-                    onClick={async () => {
-                      await persistStepData(8, {
-                        status: "CASE_CLOSED",
-                        isCaseClosed: true,
-                        closureNotes: caseState.closureNotes,
-                      });
-                      await updateStatus("CASE_CLOSED", "Case sealed, validated, and officially archived as CASE_CLOSED in PostgreSQL database.", 8);
-                      toast.success("Case successfully marked as CASE_CLOSED in PostgreSQL database!");
-                    }}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-5 py-2.5 shadow-sm"
-                  >
-                    <CheckCheck className="size-4 mr-1.5" /> Close Case (COMPLETED / CLOSED)
-                  </Button>
+                  {/* Close Case Button (Validator Only) */}
+                  {!isSecretary && (
+                    <Button
+                      type="button"
+                      onClick={async () => {
+                        await persistStepData(8, {
+                          status: "CASE_CLOSED",
+                          isCaseClosed: true,
+                          closureNotes: caseState.closureNotes,
+                        });
+                        await updateStatus("CASE_CLOSED", "Case sealed, validated, and officially archived as CASE_CLOSED in PostgreSQL database.", 8);
+                        toast.success("Case successfully marked as CASE_CLOSED in PostgreSQL database!");
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-5 py-2.5 shadow-sm"
+                    >
+                      <CheckCheck className="size-4 mr-1.5" /> Close Case (COMPLETED / CLOSED)
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1846,28 +2039,46 @@ function MSWDCaseWorkflowModalInner({
 
         {/* ── FOOTER STEP NAVIGATION ── */}
         <div className="px-6 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={currentStep === 1}
-            onClick={() => setCurrentStep((prev) => Math.max(1, prev - 1))}
-            className="text-xs"
-          >
-            <ChevronLeft className="size-4 mr-1" /> Previous Step
-          </Button>
+          {isSecretary ? (
+            <div className="w-full flex items-center justify-between">
+              <span className="text-xs text-gray-500 font-medium">
+                Frontline Intake View &bull; Read-Only &bull; Workflow advancement and validation actions are restricted to MSWD staff.
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onClose}
+                className="bg-white hover:bg-gray-100 text-gray-700 text-xs font-bold px-4 py-2 border-gray-300"
+              >
+                Close Intake Details
+              </Button>
+            </div>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={activeStep === 1}
+                onClick={() => setCurrentStep((prev) => Math.max(1, prev - 1))}
+                className="text-xs"
+              >
+                <ChevronLeft className="size-4 mr-1" /> Previous Step
+              </Button>
 
-          <span className="text-xs font-bold text-gray-500">
-            Step {currentStep} of 8
-          </span>
+              <span className="text-xs font-bold text-gray-500">
+                Step {activeStep} of 8
+              </span>
 
-          <Button
-            size="sm"
-            disabled={currentStep === 8 || (currentStep === 4 && !isEligibilityUnlocked)}
-            onClick={() => setCurrentStep((prev) => Math.min(8, prev + 1))}
-            className="bg-blue-900 hover:bg-blue-800 text-white text-xs"
-          >
-            Next Step <ChevronRight className="size-4 ml-1" />
-          </Button>
+              <Button
+                size="sm"
+                disabled={activeStep === 8 || (activeStep === 4 && !isEligibilityUnlocked)}
+                onClick={() => setCurrentStep((prev) => Math.min(8, prev + 1))}
+                className="bg-blue-900 hover:bg-blue-800 text-white text-xs"
+              >
+                Next Step <ChevronRight className="size-4 ml-1" />
+              </Button>
+            </>
+          )}
         </div>
 
       </div>

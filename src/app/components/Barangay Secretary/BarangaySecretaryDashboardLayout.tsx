@@ -274,14 +274,14 @@ export function DashboardLayout({ userRole, accountId, onLogout }: DashboardLayo
         {/* Render Active Component */}
         {activeMenu === "dashboard" && <MainDashboard onNavigate={setActiveMenu} userRole={userRole} />}
         {activeMenu === "beneficiary-profiling" && <BeneficiaryProfiling allowedSubModules={isStaff ? staffAccount?.assignedSubModules : undefined} />}
-        {activeMenu === "aics" && <AICS allowedSubModules={isStaff ? staffAccount?.assignedSubModules : undefined} />}
+        {activeMenu === "aics" && <AICS allowedSubModules={isStaff ? staffAccount?.assignedSubModules : undefined} userRole={userRole} accountId={accountId} />}
         {activeMenu === "cicl-assistance" && <CiclAssistance allowedSubModules={isStaff ? staffAccount?.assignedSubModules : undefined} />}
         {activeMenu === "day-care" && <DayCare allowedSubModules={isStaff ? staffAccount?.assignedSubModules : undefined} />}
         {activeMenu === "disaster-assistance" && <DisasterAssistance allowedSubModules={isStaff ? staffAccount?.assignedSubModules : undefined} />}
         {activeMenu === "elderly-services" && <ElderlyServices allowedSubModules={isStaff ? staffAccount?.assignedSubModules : undefined} />}
         {activeMenu === "pwd-services" && <PWDServices allowedSubModules={isStaff ? staffAccount?.assignedSubModules : undefined} />}
         {activeMenu === "supplementary-feeding" && <SupplementaryFeeding allowedSubModules={isStaff ? staffAccount?.assignedSubModules : undefined} />}
-        {activeMenu === "women-solo-parent" && <WomenSoloParent allowedSubModules={isStaff ? staffAccount?.assignedSubModules : undefined} />}
+        {activeMenu === "women-solo-parent" && <WomenSoloParent allowedSubModules={isStaff ? staffAccount?.assignedSubModules : undefined} userRole={userRole} accountId={accountId} />}
         {activeMenu === "settings" && <SettingsComponent />}
         
         {!ALL_MODULE_IDS.includes(activeMenu) && activeMenu !== "settings" && (

@@ -9,7 +9,8 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import { MSWDCaseWorkflowModal, type CaseData, getSafeStatusConfig, type WorkflowStatusCode } from "../MSWDCaseWorkflowModal";
-import { apiGetAicsCases, mapDbRecordToCaseData, subscribeDataUpdated } from "../../services/caseService";
+import { apiGetAicsCases, mapDbRecordToCaseData, subscribeDataUpdated, isSecretaryRole, getSecretarySubmittedCases } from "../../services/caseService";
+import { getBarangayById, BARANGAY_ACCOUNTS } from "../../data/barangayAccounts";
 import { NewAicsModal } from "../NewAicsModal";
 
 import { 
@@ -135,10 +136,23 @@ interface BeneficiaryRecord {
 interface FrontlineCrisisProps {
   onNavigate?: (view: string) => void;
   allowedSubModules?: string[];
+  userRole?: string;
+  accountId?: string;
 }
 
-export function AICS({ onNavigate, allowedSubModules }: FrontlineCrisisProps) {
-  const [activeView, setActiveView] = useState("dashboard");
+export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: FrontlineCrisisProps) {
+  const effectiveRole = userRole || (typeof window !== "undefined" ? sessionStorage.getItem("benefitrack_active_role") || "" : "");
+  const isSecretary = isSecretaryRole(effectiveRole) || (accountId ? !!getBarangayById(accountId) : false);
+  const isStaff = !isSecretary;
+
+  // Identify secretary's assigned barangay for personal queue filtering
+  const brgyAccount = isSecretary ? (accountId ? getBarangayById(accountId) : BARANGAY_ACCOUNTS[0]) : null;
+  const secretaryBarangayClean = (brgyAccount?.assignedBarangay || "San Juan")
+    .replace(/^(brgy\.?|barangay)\s*/i, "")
+    .trim()
+    .toLowerCase();
+
+  const [activeView, setActiveView] = useState("aics");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [profileTypeFilter, setProfileTypeFilter] = useState("all");
@@ -409,15 +423,49 @@ export function AICS({ onNavigate, allowedSubModules }: FrontlineCrisisProps) {
     setIsNewBeneficiaryModalOpen(true);
   };
 
-  // Filter Logic
+  // Helper to check if a record status is strictly in "Pending Review" or "Under Review"
+  const isPendingOrUnderReview = (statusText: string, rawStatus?: string) => {
+    const s = (statusText || "").toLowerCase();
+    const raw = (rawStatus || "").toUpperCase();
+    return (
+      s.includes("pending") ||
+      s.includes("under review") ||
+      s.includes("endorsed") ||
+      s.includes("returned") ||
+      raw === "BARANGAY_ENDORSED" ||
+      raw === "UNDER_REVIEW" ||
+      raw === "PENDING_VERIFICATION" ||
+      raw === "RETURNED_FOR_CORRECTION"
+    );
+  };
+
+  const submittedCases = getSecretarySubmittedCases();
+
+  // Filter Logic with Strict RBAC Constraints
   const filteredRecords = profilingRecords.filter(record => {
+    // RBAC: If Secretary, strictly restrict to records they personally submitted in Pending Review or Under Review
+    if (isSecretary) {
+      const matchesStatusConstraint = isPendingOrUnderReview(record.status, record.rawDbRow?.status);
+      if (!matchesStatusConstraint) return false;
+
+      const recordBarangayClean = (record.barangay || "").toLowerCase();
+      const isPersonallySubmitted =
+        submittedCases.includes(record.trackingId) ||
+        recordBarangayClean.includes(secretaryBarangayClean) ||
+        secretaryBarangayClean.includes(recordBarangayClean) ||
+        (record.rawDbRow?.created_by && record.rawDbRow.created_by.toLowerCase().includes("secretary")) ||
+        (record.rawDbRow?.barangay_name && record.rawDbRow.barangay_name.toLowerCase().includes(secretaryBarangayClean));
+
+      if (!isPersonallySubmitted) return false;
+    }
+
     const matchesSearch = 
       record.beneficiaryName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       record.trackingId.toLowerCase().includes(searchQuery.toLowerCase()) ||
       record.barangay.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesStatus = 
-      statusFilter === "all" ? true : record.status.toLowerCase() === statusFilter.toLowerCase();
+      statusFilter === "all" ? true : record.status.toLowerCase().includes(statusFilter.toLowerCase());
 
     const matchesProfileType = 
       profileTypeFilter === "all" ? true : record.profileType.toLowerCase().includes(profileTypeFilter.toLowerCase());
@@ -877,10 +925,22 @@ export function AICS({ onNavigate, allowedSubModules }: FrontlineCrisisProps) {
                       onChange={(e) => setStatusFilter(e.target.value)}
                       className="w-full appearance-none px-3 py-2 pr-8 text-sm border border-gray-300 rounded-lg bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <option value="all">All Statuses</option>
-                      <option value="Pending Verification">Pending Verification</option>
-                      <option value="Verified">Verified</option>
-                      <option value="Returned for Correction">Returned for Correction</option>
+                      {isSecretary ? (
+                        <>
+                          <option value="all">All My Pending Reviews</option>
+                          <option value="Pending Verification">Pending Verification</option>
+                          <option value="Under Review">Under Review</option>
+                          <option value="Returned for Correction">Returned for Correction</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="all">All Statuses (Full Registry)</option>
+                          <option value="Pending Verification">Pending Verification (Incoming Queue)</option>
+                          <option value="Under Review">Under Review</option>
+                          <option value="Verified">Verified / In Assessment</option>
+                          <option value="Returned for Correction">Returned for Correction</option>
+                        </>
+                      )}
                     </select>
                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 size-4 text-gray-400 pointer-events-none" />
                   </div>
@@ -938,22 +998,35 @@ export function AICS({ onNavigate, allowedSubModules }: FrontlineCrisisProps) {
                             </td>
                             <td className="px-6 py-4 text-right">
                               <div className="flex items-center justify-end gap-2">
-                                <Button 
-                                  variant="outline" 
-                                  size="sm" 
-                                  onClick={() => handleOpenWorkflow(record)}
-                                  className="bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100 font-bold"
-                                >
-                                  8-Step Workflow
-                                </Button>
-                                <Button 
-                                  variant="outline" 
-                                  size="sm" 
-                                  onClick={() => handleEditProfile(record)}
-                                  className="text-amber-600 border-amber-200 hover:bg-amber-50"
-                                >
-                                  Review
-                                </Button>
+                                {isSecretary ? (
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    onClick={() => handleOpenWorkflow(record)}
+                                    className="bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100 font-bold"
+                                  >
+                                    View Intake
+                                  </Button>
+                                ) : (
+                                  <>
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm" 
+                                      onClick={() => handleOpenWorkflow(record)}
+                                      className="bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100 font-bold"
+                                    >
+                                      8-Step Workflow
+                                    </Button>
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm" 
+                                      onClick={() => handleEditProfile(record)}
+                                      className="text-amber-600 border-amber-200 hover:bg-amber-50"
+                                    >
+                                      Review
+                                    </Button>
+                                  </>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -987,6 +1060,8 @@ export function AICS({ onNavigate, allowedSubModules }: FrontlineCrisisProps) {
         onUpdateCase={() => {
           loadCasesFromDb();
         }}
+        userRole={effectiveRole}
+        isReadOnly={isSecretary}
       />
 
       {/* New AICS Beneficiary Registration Modal */}

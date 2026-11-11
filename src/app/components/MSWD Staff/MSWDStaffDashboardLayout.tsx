@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { 
   Shield, LogOut, LayoutDashboard, Users, Heart, AlertCircle, 
   Briefcase, Menu, X, Settings, ChevronDown, Wallet 
@@ -21,8 +21,10 @@ import { AICS } from "../Barangay Secretary/AICS";
 import { SettingsEnhanced as SettingsComponent } from "../SettingsEnhanced";
 import { NotificationDropdown } from "../NotificationDropdown";
 import { LogoutConfirmDialog } from "../LogoutConfirmDialog";
-import { getStaffById, type StaffAccount } from "../../data/staffAccounts";
+import { getStaffById, STAFF_ACCOUNTS, type StaffAccount } from "../../data/staffAccounts";
 import { getSystemAccountById, type SystemAccount } from "../../data/systemAccounts";
+import { getBarangayById, BARANGAY_ACCOUNTS, type BarangayAccount } from "../../data/barangayAccounts";
+import { isSecretaryRole } from "../../services/caseService";
 
 interface DashboardLayoutProps {
   userRole: string;
@@ -32,8 +34,13 @@ interface DashboardLayoutProps {
 
 export function DashboardLayout({ userRole, accountId, onLogout }: DashboardLayoutProps) {
   // Account & Permissions Logic
+  const isSecretary = isSecretaryRole(userRole);
+  const brgyAccount: BarangayAccount | null =
+    isSecretary ? (accountId ? getBarangayById(accountId) : BARANGAY_ACCOUNTS[0]) : null;
   const staffAccount: StaffAccount | null =
-    userRole === "Staff" && accountId ? getStaffById(accountId) : null;
+    (userRole === "Staff" || !isSecretary)
+      ? (accountId ? getStaffById(accountId) : (userRole === "Staff" ? STAFF_ACCOUNTS[0] : null))
+      : null;
   const systemAccount: SystemAccount | null =
     (userRole === "HeadAccount" || userRole === "Administrator") && accountId
       ? getSystemAccountById(accountId)
@@ -42,8 +49,11 @@ export function DashboardLayout({ userRole, accountId, onLogout }: DashboardLayo
   const isStaff = userRole === "Staff" && staffAccount !== null;
   const assignedSubModules = isStaff ? staffAccount?.assignedSubModules : undefined;
 
-  const displayName = staffAccount?.name ?? systemAccount?.name ?? userRole;
-  const displayPosition = staffAccount?.position ?? systemAccount?.position ?? userRole;
+  const displayName = brgyAccount?.name ?? staffAccount?.name ?? systemAccount?.name ?? (isSecretary ? "Maria Lourdes Villanueva" : userRole);
+  const displayPosition = brgyAccount 
+    ? `${brgyAccount.position} - ${brgyAccount.assignedBarangay}` 
+    : (staffAccount?.position ?? systemAccount?.position ?? (isSecretary ? "Barangay Secretary" : userRole));
+  const displayId = brgyAccount?.employeeId ?? staffAccount?.staffId;
 
   // Layout State
   const [activeMenu, setActiveMenu] = useState("dashboard");
@@ -64,6 +74,15 @@ export function DashboardLayout({ userRole, accountId, onLogout }: DashboardLayo
     "Staff": [
       "dashboard", "women-solo-parent", "aics"
     ],
+    "BarangaySecretary": [
+      "dashboard", "women-solo-parent", "aics"
+    ],
+    "Barangay Secretary": [
+      "dashboard", "women-solo-parent", "aics"
+    ],
+    "Secretary": [
+      "dashboard", "women-solo-parent", "aics"
+    ],
     "HeadAccount": [
       "dashboard", "women-solo-parent", "aics"
     ],
@@ -77,8 +96,8 @@ export function DashboardLayout({ userRole, accountId, onLogout }: DashboardLayo
 
   // UPDATED: Clean dictionary map rendering your new components
   const renderContent = () => {
-    const views: Record<string, JSX.Element> = {
-      "dashboard": <MainDashboard />,
+    const views: Record<string, React.ReactNode> = {
+      "dashboard": <MainDashboard onNavigate={setActiveMenu} userRole={userRole} />,
       "beneficiary-profiling": <BeneficiaryProfiling />,
       "cicl-assistance": <CiclAssistance />,
       "day-care": <DayCare />,
@@ -86,8 +105,8 @@ export function DashboardLayout({ userRole, accountId, onLogout }: DashboardLayo
       "elderly-services": <ElderlyServices />,
       "pwd-services": <PWDServices />,
       "supplementary-feeding": <SupplementaryFeeding />,
-      "women-solo-parent": <WomenSoloParent />,
-      "aics": <AICS />,
+      "women-solo-parent": <WomenSoloParent userRole={userRole} accountId={accountId} />,
+      "aics": <AICS userRole={userRole} accountId={accountId} />,
       "settings": <SettingsComponent />,
     };
 
@@ -246,7 +265,7 @@ export function DashboardLayout({ userRole, accountId, onLogout }: DashboardLayo
               </Avatar>
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-gray-900 truncate">{displayName}</p>
-                {staffAccount && <p className="text-xs text-gray-400 truncate">{staffAccount.staffId}</p>}
+                {displayId && <p className="text-xs text-gray-400 truncate">{displayId}</p>}
               </div>
             </div>
           )}

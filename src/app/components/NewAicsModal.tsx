@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { X, HeartHandshake, CheckCircle2, Stethoscope, Cross, Bus, DollarSign, MapPin, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
-import { apiCreateAicsCase } from "../services/caseService";
+import { apiCreateAicsCase, saveSecretarySubmittedCase } from "../services/caseService";
 
 interface NewAicsModalProps {
   isOpen: boolean;
@@ -108,6 +108,7 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
       });
 
       const assignedTracking = (createdRecord as any)?.tracking_id || createdRecord?.case_number || trackingNumber;
+      saveSecretarySubmittedCase(assignedTracking);
       toast.success(`AICS crisis intake registered successfully with Tracking ID: ${assignedTracking}`);
       onSuccess();
       onClose();

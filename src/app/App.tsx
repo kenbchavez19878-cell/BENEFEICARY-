@@ -29,6 +29,10 @@ export default function App() {
   const handleLogin = (role: string, id?: string) => {
     setUserRole(role);
     setAccountId(id);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("benefitrack_active_role", role);
+      if (id) sessionStorage.setItem("benefitrack_account_id", id);
+    }
 
     if (role === "Beneficiary") {
       setView("beneficiary-dashboard");
@@ -37,7 +41,8 @@ export default function App() {
       setView("admin-dashboard");
     }
     else if (role === "BarangaySecretary" || role === "Barangay Secretary") {
-      setView("barangay-dashboard");
+      // Route to unified dashboard layout with RBAC capabilities
+      setView("dashboard");
     }
     // ADDED "RegisterAccountDashboard" just in case the login form passes it that way
     else if (role === "BarangayRegistrar" || role === "Barangay Registrar" || role === "RegisterAccountDashboard") {
@@ -56,6 +61,10 @@ export default function App() {
     setView("website");
     setUserRole("");
     setAccountId(undefined);
+    if (typeof window !== "undefined") {
+      sessionStorage.removeItem("benefitrack_active_role");
+      sessionStorage.removeItem("benefitrack_account_id");
+    }
   };
 
   return (
@@ -100,8 +109,8 @@ export default function App() {
       )}
 
       {view === "barangay-dashboard" && (
-        <BarangaySecretaryDashboardLayout
-          userRole={userRole}
+        <MSWDDashboardLayout
+          userRole={userRole || "BarangaySecretary"}
           accountId={accountId}
           onLogout={handleLogout}
         />
