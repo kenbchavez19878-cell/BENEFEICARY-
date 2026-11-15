@@ -2008,7 +2008,7 @@ function ServiceDetail({
                   { step: 5, title: "Complete Application Form", desc: "Fill out the service-specific application form. Your profile information (name, address, contact) is auto-filled — no need to re-enter." },
                   { step: 6, title: "Upload Required Documents", desc: `Upload digital copies of required documents in PDF, JPG, PNG, or DOC format (max 10 MB each).` },
                   { step: 7, title: "Submit Application", desc: "Review your application summary and click Submit. A reference number will be generated for tracking." },
-                  { step: 8, title: "MSWD Staff Reviews Application", desc: "Staff reviews your submitted application and documents. You will be notified of the status update via SMS." },
+                  { step: 8, title: "MSWD Staff Reviews Application", desc: "Staff reviews your submitted application and documents." },
                 ].map(({ step, title, desc }) => (
                   <div key={step} className="flex items-start gap-4">
                     <div className="size-7 rounded-full bg-blue-700 text-white flex items-center justify-center flex-shrink-0 text-xs font-bold mt-0.5">{step}</div>

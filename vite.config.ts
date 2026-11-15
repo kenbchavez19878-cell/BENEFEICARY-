@@ -18,6 +18,7 @@ function figmaAssetResolver() {
 export default defineConfig({
   server: {
     port: 5173,
+    strictPort: true,
     host: true, // Listen on all network addresses (both localhost and 127.0.0.1)
     proxy: {
       '/api': {

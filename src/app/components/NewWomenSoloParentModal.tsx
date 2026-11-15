@@ -1,8 +1,10 @@
-import React, { useState } from "react";
+import { CALABANGA_BARANGAYS } from "../data/calabangaBarangays";
+import React, { useState, useRef, useEffect } from "react";
 import { X, UserPlus, CheckCircle2, ShieldCheck, HeartHandshake, Baby, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
 import { IntakeDocumentUploads, SOLO_PARENT_REQUIREMENTS, WOMEN_REQUIREMENTS } from "./IntakeDocumentUploads";
+import { getIntakeFileError } from "../utils/intakeFileValidation";
 import type { IntakeDocument } from "../services/caseService";
 import { apiCreateWomenSoloParentCase, saveSecretarySubmittedCase } from "../services/caseService";
 
@@ -12,40 +14,6 @@ interface NewWomenSoloParentModalProps {
   onSuccess: () => void;
 }
 
-const CALABANGA_BARANGAYS = [
-  "San Juan",
-  "San Francisco",
-  "Sabang",
-  "Balongay",
-  "Belen",
-  "Bigaas",
-  "Bonbon",
-  "Burabod",
-  "Cabanbanan",
-  "Cagsao",
-  "Camuning",
-  "Comaguingking",
-  "Dominorog",
-  "Paolbo",
-  "Pinada",
-  "Punta Tarawal",
-  "Quipayo",
-  "Salvacion",
-  "San Antonio",
-  "San Bernardino",
-  "San Lucas",
-  "San Pablo",
-  "San Pedro",
-  "San Roque",
-  "San Vicente",
-  "Santa Cruz",
-  "Santa Isabel",
-  "Santa Salud",
-  "Santo Domingo",
-  "Santo Niño",
-  "Sibobo",
-  "Tomagodtod"
-];
 
 const SOLO_PARENT_REASONS = [
   "Spouse Deceased",
@@ -58,13 +26,17 @@ const SOLO_PARENT_REASONS = [
 export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomenSoloParentModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [documents, setDocuments] = useState<IntakeDocument[]>([]);
-  const [trackingNumber] = useState(() => `BEN-2026-${Math.floor(100000 + Math.random() * 900000)}`);
+  const [trackingNumber, setTrackingNumber] = useState(() => `BEN-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`);
 
   // Form State
-  const [fullName, setFullName] = useState("");
-  const [birthDate, setBirthDate] = useState("1992-05-15");
-  const [gender, setGender] = useState("Female");
-  const [civilStatus, setCivilStatus] = useState("Single Parent");
+  const formRef = useRef<HTMLFormElement>(null);
+  const [firstName, setFirstName] = useState("");
+  const [middleName, setMiddleName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [extensionName, setExtensionName] = useState("");
+  const [birthDate, setBirthDate] = useState("");
+  const [gender, setGender] = useState("FEMALE");
+  const [civilStatus, setCivilStatus] = useState("SINGLE_PARENT");
   const [barangay, setBarangay] = useState("San Juan");
   const [contactNumber, setContactNumber] = useState("");
   const [indigencyLevel, setIndigencyLevel] = useState("Low Income (₱5,000 - ₱10,000/mo)");
@@ -76,26 +48,51 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
 
   const requirements = category === "SOLO_PARENT" ? SOLO_PARENT_REQUIREMENTS : WOMEN_REQUIREMENTS;
 
+  useEffect(() => {
+    if (isOpen) return;
+    setTrackingNumber(`BEN-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`);
+    setFirstName(""); setMiddleName(""); setLastName(""); setExtensionName("");
+    setBirthDate(""); setContactNumber(""); setDocuments([]);
+    setGender("FEMALE"); setBarangay("San Juan"); setInitialStatus("BARANGAY_ENDORSED");
+    setCivilStatus("SINGLE_PARENT"); setCategory("SOLO_PARENT");
+    setDependentChildren(2); setSoloParentReason("Unmarried Parent");
+    setIndigencyLevel("Low Income (₱5,000 - ₱10,000/mo)");
+    setNotes("");
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
-    if (!fullName.trim()) {
-      toast.error("Please enter the beneficiary's full name");
+    if (!formRef.current?.reportValidity()) return;
+    if (!firstName.trim() || !lastName.trim()) {
+      toast.error("First name and last name are required.");
       return;
+    }
+
+    const selectedDocuments = documents.filter((doc) => requirements.some((requirement) => requirement.id === doc.id));
+    for (const { file } of selectedDocuments) {
+      const error = getIntakeFileError(file);
+      if (error) {
+        toast.error(error);
+        return;
+      }
     }
 
     try {
       setIsSubmitting(true);
       const createdRecord = await apiCreateWomenSoloParentCase({
         case_number: trackingNumber,
-        fullName: fullName.trim(),
+        firstName: firstName.trim(),
+        middleName: middleName.trim(),
+        lastName: lastName.trim(),
+        extensionName: extensionName.trim(),
         birthDate,
         gender,
         civilStatus,
         barangay,
-        contactNumber: contactNumber.trim() || "0917-000-0000",
+        contactNumber: contactNumber.trim(),
         indigencyLevel,
         category,
         dependentChildren: category === "SOLO_PARENT" ? Number(dependentChildren) : 0,
@@ -103,7 +100,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
         status: initialStatus,
         financialAidAmount: 3000,
         notes: notes.trim() || undefined,
-      }, documents.filter((doc) => requirements.some((requirement) => requirement.id === doc.id)));
+      }, selectedDocuments);
 
       const assignedTracking = (createdRecord as any)?.tracking_id || createdRecord?.case_number || trackingNumber;
       saveSecretarySubmittedCase(assignedTracking);
@@ -151,7 +148,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
+        <form ref={formRef} onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6 pb-20 sm:pb-6">
           
           {/* Category Toggle */}
           <div>
@@ -204,16 +201,62 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
             </h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="sm:col-span-2">
-                <label className="text-xs font-semibold text-gray-700 block mb-1">
-                  Full Legal Name (Last, First Middle) *
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1" htmlFor="NewWomenSoloParentModal.tsx-firstName">
+                  First Name *
                 </label>
                 <input
+                  id="NewWomenSoloParentModal.tsx-firstName"
                   type="text"
                   required
-                  placeholder="e.g. Santos, Maria Dela Cruz"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
+                  maxLength={120}
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1" htmlFor="NewWomenSoloParentModal.tsx-middleName">
+                  Middle Name
+                </label>
+                <input
+                  id="NewWomenSoloParentModal.tsx-middleName"
+                  type="text"
+                  aria-required={false}
+                  maxLength={120}
+                  value={middleName}
+                  onChange={(e) => setMiddleName(e.target.value)}
+                  className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1" htmlFor="NewWomenSoloParentModal.tsx-lastName">
+                  Last Name *
+                </label>
+                <input
+                  id="NewWomenSoloParentModal.tsx-lastName"
+                  type="text"
+                  required
+                  maxLength={120}
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1" htmlFor="NewWomenSoloParentModal.tsx-extensionName">
+                  Extension Name
+                </label>
+                <input
+                  id="NewWomenSoloParentModal.tsx-extensionName"
+                  type="text"
+                  aria-required={false}
+                  maxLength={30}
+                  value={extensionName}
+                  onChange={(e) => setExtensionName(e.target.value)}
                   className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
                 />
               </div>
@@ -224,6 +267,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
                 </label>
                 <input
                   type="date"
+                  max={new Date().toLocaleDateString("en-CA")}
                   required
                   value={birthDate}
                   onChange={(e) => setBirthDate(e.target.value)}
@@ -236,13 +280,14 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
                   Gender *
                 </label>
                 <select
+                  required
                   value={gender}
                   onChange={(e) => setGender(e.target.value)}
                   className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
                 >
-                  <option value="Female">Female</option>
-                  <option value="Male">Male</option>
-                  <option value="Other">Other / Non-Binary</option>
+                  <option value="FEMALE">Female</option>
+                  <option value="MALE">Male</option>
+                  <option value="OTHER">Other / Non-Binary</option>
                 </select>
               </div>
 
@@ -251,16 +296,17 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
                   Civil Status *
                 </label>
                 <select
+                  required
                   value={civilStatus}
                   onChange={(e) => setCivilStatus(e.target.value)}
                   className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
                 >
-                  <option value="Single Parent">Single Parent</option>
-                  <option value="Widowed">Widowed</option>
-                  <option value="Separated">Separated / Abandoned</option>
-                  <option value="Annulled">Annulled</option>
-                  <option value="Married">Married</option>
-                  <option value="Common Law">Common Law / Live-in</option>
+                  <option value="SINGLE_PARENT">Single Parent</option>
+                  <option value="WIDOWED">Widowed</option>
+                  <option value="SEPARATED">Separated / Abandoned</option>
+                  <option value="ANNULLED">Annulled</option>
+                  <option value="MARRIED">Married</option>
+                  <option value="COMMON_LAW">Common Law / Live-in</option>
                 </select>
               </div>
 
@@ -269,10 +315,12 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
                   Barangay *
                 </label>
                 <select
+                  required
                   value={barangay}
                   onChange={(e) => setBarangay(e.target.value)}
                   className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
                 >
+                  {barangay && !CALABANGA_BARANGAYS.includes(barangay) && <option value={barangay}>Brgy. {barangay} (existing assignment)</option>}
                   {CALABANGA_BARANGAYS.map((b) => (
                     <option key={b} value={b}>
                       Brgy. {b}
@@ -299,6 +347,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
                   Low Income / Indigency Level *
                 </label>
                 <select
+                  required
                   value={indigencyLevel}
                   onChange={(e) => setIndigencyLevel(e.target.value)}
                   className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
@@ -326,10 +375,11 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
                   </label>
                   <input
                     type="number"
+                    required
                     min="1"
                     max="15"
                     value={dependentChildren}
-                    onChange={(e) => setDependentChildren(Math.max(1, parseInt(e.target.value) || 1))}
+                    onChange={(e) => setDependentChildren(Number(e.target.value))}
                     className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none bg-white"
                   />
                   <p className="text-[11px] text-gray-500 mt-1">Dependents aged below 22 years old unmarried.</p>
@@ -340,6 +390,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
                     Primary Reason for Solo Parenthood *
                   </label>
                   <select
+                    required
                     value={soloParentReason}
                     onChange={(e) => setSoloParentReason(e.target.value)}
                     className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none bg-white"
@@ -367,6 +418,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
                   Initial Workflow Status *
                 </label>
                 <select
+                  required
                   value={initialStatus}
                   onChange={(e) => setInitialStatus(e.target.value as any)}
                   className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white font-medium"
@@ -412,7 +464,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
         </form>
 
         {/* Modal Footer */}
-        <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
+        <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between overflow-x-auto sm:overflow-visible">
           <div className="text-xs text-gray-500 flex items-center gap-1.5">
             <AlertCircle className="size-3.5 text-blue-600" />
             <span>Record will be instantly stored to PostgreSQL and reflected on the Dashboard.</span>

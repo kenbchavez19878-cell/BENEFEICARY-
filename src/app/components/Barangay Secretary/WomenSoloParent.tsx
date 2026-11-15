@@ -1,4 +1,7 @@
-import React, { useState, useEffect, useCallback } from "react";
+import { IntakeDocumentUploads, SOLO_PARENT_REQUIREMENTS, WOMEN_REQUIREMENTS, aicsRequirements } from "../IntakeDocumentUploads";
+import type { IntakeDocument } from "../../services/caseService";
+import { ageFromBirthDate, mapNameFields } from "../../utils/intakeProfile";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
 import { Badge } from "../ui/badge";
@@ -9,7 +12,7 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import { MSWDCaseWorkflowModal, type CaseData, getSafeStatusConfig, type WorkflowStatusCode } from "../MSWDCaseWorkflowModal";
-import { apiGetWomenSoloParentCases, mapDbRecordToCaseData, subscribeDataUpdated, isSecretaryRole, getSecretarySubmittedCases } from "../../services/caseService";
+import { apiGetWomenSoloParentCases, mapDbRecordToCaseData, subscribeDataUpdated, apiGetCaseById, getCorrectionNotes, apiUpdateCaseNames, apiReturnCaseForCorrection, isSecretaryRole, apiResubmitReturnedCase } from "../../services/caseService";
 import { getBarangayById, BARANGAY_ACCOUNTS } from "../../data/barangayAccounts";
 import { NewWomenSoloParentModal } from "../NewWomenSoloParentModal";
 
@@ -142,12 +145,13 @@ interface FrontlineCrisisProps {
 
 export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accountId }: FrontlineCrisisProps) {
   const effectiveRole = userRole || (typeof window !== "undefined" ? sessionStorage.getItem("benefitrack_active_role") || "" : "");
-  const isSecretary = isSecretaryRole(effectiveRole) || (accountId ? !!getBarangayById(accountId) : false);
+  const effectiveAccountId = accountId || (typeof window !== "undefined" ? sessionStorage.getItem("benefitrack_account_id") || undefined : undefined);
+  const isSecretary = isSecretaryRole(effectiveRole) || (effectiveAccountId ? !!getBarangayById(effectiveAccountId) : false);
   const isStaff = !isSecretary;
 
   // Identify secretary's assigned barangay for personal queue filtering
-  const brgyAccount = isSecretary ? (accountId ? getBarangayById(accountId) : BARANGAY_ACCOUNTS[0]) : null;
-  const secretaryBarangayClean = (brgyAccount?.assignedBarangay || "San Juan")
+  const brgyAccount = isSecretary ? (effectiveAccountId ? getBarangayById(effectiveAccountId) : BARANGAY_ACCOUNTS[0]) : null;
+  const secretaryBarangayClean = (brgyAccount?.assignedBarangay || "")
     .replace(/^(brgy\.?|barangay)\s*/i, "")
     .trim()
     .toLowerCase();
@@ -162,10 +166,26 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
   const [profilingEditModalOpen, setProfilingEditModalOpen] = useState(false);
   const [isAddMode, setIsAddMode] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<ProfilingRecord | null>(null);
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const isReturnedProfile = selectedProfile?.rawDbRow?.status === "RETURNED_FOR_CORRECTION";
+  const canCorrectReturned = isSecretary && selectedProfile?.rawDbRow?.status === "RETURNED_FOR_CORRECTION";
+  const [correctedDocuments, setCorrectedDocuments] = useState<IntakeDocument[]>([]);
+  const correctionRequirements = Array.from(new Map([
+    ...(selectedProfile?.rawDbRow?.category === "WOMEN_VAWC" ? WOMEN_REQUIREMENTS : SOLO_PARENT_REQUIREMENTS),
+    ...(selectedProfile?.rawDbRow?.documents || []).map((document: any) => ({ id: document.id, name: document.name })),
+  ].map(item => [item.id, item])).values());
 
   // Official MSWD 8-Step Workflow State
   const [workflowModalOpen, setWorkflowModalOpen] = useState(false);
   const [activeWorkflowCase, setActiveWorkflowCase] = useState<CaseData | Partial<CaseData> | null>(null);
+
+  const keepSavedCaseVisible = (record: ProfilingRecord) => {
+    if (statusFilter !== "all" && !record.status.toLowerCase().includes(statusFilter.toLowerCase())) setStatusFilter("all");
+    if (profileTypeFilter !== "all" && !record.profileType.toLowerCase().includes(profileTypeFilter.toLowerCase())) setProfileTypeFilter("all");
+    const query = searchQuery.toLowerCase();
+    if (![record.beneficiaryName, record.trackingId, record.barangay].some(value => value.toLowerCase().includes(query))) setSearchQuery("");
+  };
 
   // New Beneficiary Registration Modal State
   const [isNewBeneficiaryModalOpen, setIsNewBeneficiaryModalOpen] = useState(false);
@@ -195,20 +215,17 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
         profileType: profileTypeDisplay,
         registrationType: "Family",
         sector: profileTypeDisplay,
-        lastName: row.beneficiary_name.split(',')[0]?.trim() || row.beneficiary_name,
-        firstName: row.beneficiary_name.split(',')[1]?.trim() || '',
-        middleName: "",
-        extensionName: "None",
+        ...mapNameFields(row),
         name: row.beneficiary_name,
-        birthdate: "October 14, 1988",
-        age: 37,
+        birthdate: row.birth_date || "",
+        age: ageFromBirthDate(row.birth_date || ""),
         birthPlace: "Calabanga, Camarines Sur",
-        sexAtBirth: "Female",
-        civilStatus: "Single Parent",
+        sexAtBirth: String(row.gender || "").toLowerCase().replace(/^./, c => c.toUpperCase()),
+        civilStatus: String(row.civil_status || "").toLowerCase().replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
         nationality: "Filipino",
         religion: "Roman Catholic",
         highestEducationalAttainment: "High School Graduate",
-        contactNumber: "09171234567",
+        contactNumber: row.contact_number || "",
         email: "beneficiary@gmail.com",
         province: "Camarines Sur",
         municipality: "Calabanga",
@@ -242,186 +259,126 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
     };
   }, []);
 
+  const caseLoadRequest = useRef(0);
+  const seenReturnedCases = useRef(new Set<string>());
   const loadCasesFromDb = useCallback(async () => {
+    const requestId = ++caseLoadRequest.current;
     try {
-      const rows = await apiGetWomenSoloParentCases();
-      if (rows && rows.length > 0) {
-        const mapped = rows.map(mapDbRowToProfilingRecord);
-        setProfilingRecords(mapped);
-      }
+      const rows = await apiGetWomenSoloParentCases(isSecretary ? { queue: "secretary", barangay: secretaryBarangayClean } : undefined);
+      if (requestId !== caseLoadRequest.current) return;
+      const returned = new Set(rows.filter(row => row.status === "RETURNED_FOR_CORRECTION").map(row => row.case_number));
+      if (isSecretary) returned.forEach(id => {
+        if (!seenReturnedCases.current.has(id)) toast.info(`${id} was returned for correction.`);
+      });
+      seenReturnedCases.current = returned;
+      setProfilingRecords(rows.map(mapDbRowToProfilingRecord));
     } catch (err) {
-      console.warn("[PostgreSQL] Could not fetch cases, using local state:", err);
+      console.warn("[PostgreSQL] Could not refresh cases:", err);
     }
-  }, [mapDbRowToProfilingRecord]);
+  }, [mapDbRowToProfilingRecord, isSecretary, secretaryBarangayClean]);
 
   useEffect(() => {
     loadCasesFromDb();
-    const unsubscribe = subscribeDataUpdated(() => {
-      loadCasesFromDb();
-    });
+    const unsubscribe = subscribeDataUpdated(loadCasesFromDb);
     return unsubscribe;
   }, [loadCasesFromDb]);
 
   const handleOpenWorkflow = (record?: ProfilingRecord) => {
     const modType = record?.profileType?.includes("VAWC") ? "women-vawc" : "solo-parent";
-    let fullCase: CaseData;
-    if (record?.rawDbRow) {
-      fullCase = mapDbRecordToCaseData(record.rawDbRow, modType);
-    } else {
-      const rawStatusCode = (record?.status?.replace(/\s+/g, '_').toUpperCase() as any) || "BARANGAY_ENDORSED";
-      fullCase = mapDbRecordToCaseData({
-        id: (record?.rawDbRow?.id as number) || 0,
-        case_number: record?.trackingId || "BEN-2026-000125",
-        beneficiary_name: record?.beneficiaryName || "Reyes, Maria Santos",
-        barangay_name: record?.barangay || "San Juan",
-        status: rawStatusCode,
-        category: modType === "women-vawc" ? "WOMEN_VAWC" : "SOLO_PARENT",
-        financial_aid_amount: 3000,
-      }, modType);
+    if (!record?.rawDbRow) {
+      toast.error("Select a saved case to open its workflow.");
+      return;
     }
+    const fullCase = mapDbRecordToCaseData(record.rawDbRow, modType);
     setActiveWorkflowCase(fullCase);
     setWorkflowModalOpen(true);
   };
 
   // Using useState to allow dynamic status updates & record additions
-  const [profilingRecords, setProfilingRecords] = useState<ProfilingRecord[]>([
-    {
-      trackingId: "BEN-2026-000125",
-      beneficiaryName: "Reyes, Maria Santos",
-      profileType: "Family Profile",
-      barangay: "San Juan",
-      status: "Pending Verification",
-      statusColor: "text-amber-700",
-      statusBg: "bg-amber-100",
-      fullInfo: {
-        familyRegistryId: "FAM-2026-000456",
-        beneficiaryId: "BEN-2026-000125",
-        profileType: "Family Profile",
-        registrationType: "Family",
-        sector: "Family",
-        lastName: "Reyes",
-        firstName: "Maria",
-        middleName: "Santos",
-        extensionName: "None",
-        name: "Reyes, Maria Santos",
-        birthdate: "October 14, 1988",
-        age: 37,
-        birthPlace: "Calabanga, Camarines Sur",
-        sexAtBirth: "Female",
-        civilStatus: "Married",
-        nationality: "Filipino",
-        religion: "Roman Catholic",
-        highestEducationalAttainment: "High School Graduate",
-        contactNumber: "09171234567",
-        email: "maria.reyes@gmail.com",
-        province: "Camarines Sur",
-        municipality: "Calabanga",
-        barangay: "San Juan",
-        purokZone: "Zone 3",
-        streetAddress: "123 Mabini St.",
-        address: "123 Mabini St., Zone 3, San Juan, Calabanga, Camarines Sur",
-        residencyStatus: "Permanent Resident",
-        employmentStatus: "Informal Worker",
-        occupation: "Informal Worker",
-        monthlyPersonalIncome: "₱8,500",
-        sourceOfIncome: "Informal Work",
-        householdIncome: "₱20,500",
-        economicClassification: "Low Income Household",
-        is4Ps: true,
-        fourPsId: "12345678901234",
-        isIP: false,
-        ipTribe: "N/A",
-        isSoloParent: false,
-        isSeniorCitizen: false,
-        isPWD: false,
-        submittedDate: "January 15, 2026",
-        verificationStatus: "Pending Verification",
-        assignedVerifier: "Barangay Registrar - San Juan",
-        approvedDate: null,
-        approvedBy: "N/A",
-        approvingOffice: "MSWD Calabanga",
-        remarks: "For validation of household relationship documents",
-        householdMembers: [
-          {
-            id: "HM-01",
-            fullName: "Reyes, Juanito Dela Cruz",
-            relationship: "Spouse",
-            birthdate: "May 12, 1985",
-            age: 40,
-            sexAtBirth: "Male",
-            highestEducationalAttainment: "High School Graduate",
-            employmentStatus: "Employed",
-            occupation: "Construction Worker",
-            monthlyPersonalIncome: "₱12,000",
-            verificationDocType: "Marriage Certificate (PSA)",
-            verificationFile: "marriage_certificate_psa.pdf",
-            verificationStatus: "Pending Review"
-          },
-          {
-            id: "HM-02",
-            fullName: "Reyes, Angela Mae Santos",
-            relationship: "Daughter",
-            birthdate: "August 22, 2015",
-            age: 10,
-            sexAtBirth: "Female",
-            highestEducationalAttainment: "Grade School Level",
-            employmentStatus: "Student",
-            occupation: "None",
-            monthlyPersonalIncome: "₱0",
-            verificationDocType: "Birth Certificate",
-            verificationFile: "birth_certificate_angela.pdf",
-            verificationStatus: "Pending Review"
-          }
-        ]
-      }
-    }
-  ]);
+  const [profilingRecords, setProfilingRecords] = useState<ProfilingRecord[]>([]);
 
-  const handleEditProfile = (record: ProfilingRecord) => {
-    setSelectedProfile(record);
-    setIsAddMode(false);
-    setProfilingEditModalOpen(true);
+  const profileLoadRequest = useRef(0);
+  const profileSaveInFlight = useRef(false);
+
+  const handleEditProfile = async (record: ProfilingRecord) => {
+    const requestId = ++profileLoadRequest.current;
+    try {
+      const latest = record.rawDbRow
+        ? mapDbRowToProfilingRecord((await apiGetCaseById(record.trackingId, "women-solo-parent")).data)
+        : record;
+      if (requestId !== profileLoadRequest.current) return;
+      setCorrectedDocuments([]);
+      setReviewNotes("");
+      setSelectedProfile(latest);
+      setIsAddMode(false);
+      setProfilingEditModalOpen(true);
+    } catch (error: any) {
+      toast.error(error.message || "Could not load the beneficiary profile.");
+    }
   };
 
-  const handleSaveProfileEdit = (e: React.FormEvent) => {
+  const handleSaveProfileEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedProfile) {
-      setProfilingRecords(prevRecords => 
-        prevRecords.map(record => 
-          record.trackingId === selectedProfile.trackingId 
-            ? { 
-                ...record, 
-                status: "Verified",
-                statusColor: "text-green-700",
-                statusBg: "bg-green-100",
-                fullInfo: record.fullInfo ? { ...record.fullInfo, verificationStatus: "Verified" } : undefined
-              } 
-            : record
-        )
-      );
+    if (!selectedProfile?.fullInfo || profileSaveInFlight.current) return;
+    profileSaveInFlight.current = true;
+    setProfileSaving(true);
+    try {
+      let confirmed = selectedProfile;
+      const names = {
+        ...mapNameFields(selectedProfile.fullInfo),
+        ...(selectedProfile.fullInfo.birthdate ? { birthDate: selectedProfile.fullInfo.birthdate } : {}),
+        ...(selectedProfile.fullInfo.sexAtBirth ? { gender: selectedProfile.fullInfo.sexAtBirth } : {}),
+        ...(selectedProfile.fullInfo.civilStatus ? { civilStatus: selectedProfile.fullInfo.civilStatus } : {}),
+        contactNumber: selectedProfile.fullInfo.contactNumber,
+      };
+      if (isSecretary && selectedProfile.rawDbRow?.status === "RETURNED_FOR_CORRECTION") {
+        const saved = await apiResubmitReturnedCase(selectedProfile.trackingId, names, "women-solo-parent", selectedProfile.rawDbRow.workflow_version, correctedDocuments);
+        confirmed = mapDbRowToProfilingRecord(saved);
+        keepSavedCaseVisible(confirmed);
+        setSelectedProfile(confirmed);
+        setProfilingRecords(records => records.map(record => record.trackingId === confirmed.trackingId ? confirmed : record));
+        toast.success("Corrections resubmitted for MSWD review.");
+        setProfilingEditModalOpen(false);
+        await loadCasesFromDb();
+        return;
+      }
+      // Legacy records without explicit name parts retain their original stored name.
+      if (selectedProfile.rawDbRow && (names.firstName || names.lastName)) {
+        const saved = await apiUpdateCaseNames(selectedProfile.trackingId, names, "women-solo-parent");
+        confirmed = mapDbRowToProfilingRecord(saved);
+      }
+      setSelectedProfile(confirmed);
+      keepSavedCaseVisible(confirmed);
+      setProfilingRecords(records => records.map(record => record.trackingId === confirmed.trackingId ? confirmed : record));
+      toast.success("Profile saved successfully.");
+      setProfilingEditModalOpen(false);
+    } catch (error: any) {
+      toast.error(error.message || "Could not save the beneficiary profile.");
+    } finally {
+      profileSaveInFlight.current = false;
+      setProfileSaving(false);
     }
-    toast.success("Profile has been successfully endorsed and verified!");
-    setProfilingEditModalOpen(false);
   };
 
-  const handleReturnToBeneficiary = () => {
-    if (selectedProfile) {
-      setProfilingRecords(prevRecords => 
-        prevRecords.map(record => 
-          record.trackingId === selectedProfile.trackingId 
-            ? { 
-                ...record, 
-                status: "Returned for Correction",
-                statusColor: "text-red-700",
-                statusBg: "bg-red-100",
-                fullInfo: record.fullInfo ? { ...record.fullInfo, verificationStatus: "Returned" } : undefined
-              } 
-            : record
-        )
-      );
+  const handleReturnToBeneficiary = async () => {
+    if (!selectedProfile?.rawDbRow || profileSaveInFlight.current) return;
+    if (!reviewNotes.trim()) { toast.error("Enter the specific corrections or missing requirements in Review Notes."); return; }
+    profileSaveInFlight.current = true;
+    setProfileSaving(true);
+    try {
+      const saved = await apiReturnCaseForCorrection(selectedProfile.trackingId, reviewNotes, "women-solo-parent", selectedProfile.rawDbRow.workflow_version, selectedProfile.rawDbRow.status);
+      const confirmed = mapDbRowToProfilingRecord(saved);
+      setSelectedProfile(confirmed);
+      setProfilingRecords(records => records.map(record => record.trackingId === confirmed.trackingId ? confirmed : record));
+      toast.success("Case returned for correction and saved for barangay review.");
+      setProfilingEditModalOpen(false);
+      await loadCasesFromDb();
+    } catch (error: any) {
+      toast.error(error.message || "Could not return the case for correction.");
+    } finally {
+      profileSaveInFlight.current = false;
+      setProfileSaving(false);
     }
-    toast.error("Profile has been returned to the beneficiary for corrections.");
-    setProfilingEditModalOpen(false);
   };
 
   const handleAddProfilingRecord = () => {
@@ -444,7 +401,6 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
     );
   };
 
-  const submittedCases = getSecretarySubmittedCases();
 
   // Filter Logic with Strict RBAC Constraints
   const filteredRecords = profilingRecords.filter(record => {
@@ -453,15 +409,8 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
       const matchesStatusConstraint = isPendingOrUnderReview(record.status, record.rawDbRow?.status);
       if (!matchesStatusConstraint) return false;
 
-      const recordBarangayClean = (record.barangay || "").toLowerCase();
-      const isPersonallySubmitted =
-        submittedCases.includes(record.trackingId) ||
-        recordBarangayClean.includes(secretaryBarangayClean) ||
-        secretaryBarangayClean.includes(recordBarangayClean) ||
-        (record.rawDbRow?.created_by && record.rawDbRow.created_by.toLowerCase().includes("secretary")) ||
-        (record.rawDbRow?.barangay_name && record.rawDbRow.barangay_name.toLowerCase().includes(secretaryBarangayClean));
-
-      if (!isPersonallySubmitted) return false;
+      const recordBarangayClean = (record.barangay || "").replace(/^(brgy\.?|barangay)\s*/i, "").trim().toLowerCase();
+      if (!secretaryBarangayClean || recordBarangayClean !== secretaryBarangayClean) return false;
     }
 
     const matchesSearch = 
@@ -517,6 +466,7 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                 <p className="text-sm text-gray-500 mt-1">
                   Beneficiary ID: <span className="font-semibold text-gray-700">{selectedProfile.fullInfo.beneficiaryId}</span> | 
                   Family Registry ID: <span className="font-semibold text-gray-700">{selectedProfile.fullInfo.familyRegistryId}</span>
+                  {canCorrectReturned && <span className="block font-semibold text-amber-800 whitespace-pre-wrap break-words">MSWD correction instructions: {getCorrectionNotes(selectedProfile.rawDbRow)}</span>}
                 </p>
               </div>
             </div>
@@ -561,24 +511,24 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
 
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Last Name</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.lastName} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" required={canCorrectReturned} disabled={!canCorrectReturned || profileSaving} readOnly={!canCorrectReturned} value={selectedProfile.fullInfo.lastName} onChange={(event) => { const value = event.target.value; setSelectedProfile(current => current?.fullInfo ? { ...current, fullInfo: { ...current.fullInfo, lastName: value } } : current); }} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">First Name</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.firstName} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" required={canCorrectReturned} disabled={!canCorrectReturned || profileSaving} readOnly={!canCorrectReturned} value={selectedProfile.fullInfo.firstName} onChange={(event) => { const value = event.target.value; setSelectedProfile(current => current?.fullInfo ? { ...current, fullInfo: { ...current.fullInfo, firstName: value } } : current); }} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Middle Name</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.middleName} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled={!canCorrectReturned || profileSaving} readOnly={!canCorrectReturned} value={selectedProfile.fullInfo.middleName} onChange={(event) => { const value = event.target.value; setSelectedProfile(current => current?.fullInfo ? { ...current, fullInfo: { ...current.fullInfo, middleName: value } } : current); }} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Extension Name</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.extensionName} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled={!canCorrectReturned || profileSaving} readOnly={!canCorrectReturned} value={selectedProfile.fullInfo.extensionName} onChange={(event) => { const value = event.target.value; setSelectedProfile(current => current?.fullInfo ? { ...current, fullInfo: { ...current.fullInfo, extensionName: value } } : current); }} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Date of Birth</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.birthdate} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type={canCorrectReturned ? "date" : "text"} required={canCorrectReturned} disabled={!canCorrectReturned || profileSaving} readOnly={!canCorrectReturned} value={selectedProfile.fullInfo.birthdate} onChange={event => { const value = event.target.value; setSelectedProfile(current => current?.fullInfo ? { ...current, fullInfo: { ...current.fullInfo, birthdate: value, age: ageFromBirthDate(value) } } : current); }} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Age</label>
@@ -591,17 +541,24 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
 
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Sex at Birth</label>
-                      <select disabled defaultValue={selectedProfile.fullInfo.sexAtBirth} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
+                      <select disabled={!canCorrectReturned || profileSaving} required={canCorrectReturned} value={selectedProfile.fullInfo.sexAtBirth} onChange={event => { const value = event.target.value; setSelectedProfile(current => current?.fullInfo ? { ...current, fullInfo: { ...current.fullInfo, sexAtBirth: value } } : current); }} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
+                        <option value="" disabled>Select gender...</option>
                         <option>Female</option>
                         <option>Male</option>
+                        <option>Other</option>
                       </select>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Civil Status</label>
-                      <select disabled defaultValue={selectedProfile.fullInfo.civilStatus} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
+                      <select disabled={!canCorrectReturned || profileSaving} required={canCorrectReturned} value={selectedProfile.fullInfo.civilStatus} onChange={event => { const value = event.target.value; setSelectedProfile(current => current?.fullInfo ? { ...current, fullInfo: { ...current.fullInfo, civilStatus: value } } : current); }} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
+                        <option value="" disabled>Select civil status...</option>
                         <option>Single</option>
                         <option>Married</option>
                         <option>Widowed</option>
+                        <option>Single Parent</option>
+                        <option>Separated</option>
+                        <option>Annulled</option>
+                        <option>Common Law</option>
                       </select>
                     </div>
                     <div>
@@ -626,7 +583,7 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-sm">
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Contact Number</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.contactNumber} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled={!canCorrectReturned || profileSaving} readOnly={!canCorrectReturned} value={selectedProfile.fullInfo.contactNumber} onChange={event => { const value = event.target.value; setSelectedProfile(current => current?.fullInfo ? { ...current, fullInfo: { ...current.fullInfo, contactNumber: value } } : current); }} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Email</label>
@@ -782,6 +739,8 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                   </section>
                 )}
 
+                {canCorrectReturned && <IntakeDocumentUploads requirements={correctionRequirements} documents={correctedDocuments} onChange={setCorrectedDocuments} disabled={profileSaving} existingDocuments={selectedProfile.rawDbRow?.documents || []} />}
+
                 {/* 6. BARANGAY VERIFICATION */}
                 <section className="bg-blue-50/50 p-6 rounded-xl border border-blue-100">
                   <h3 className="text-sm font-bold text-blue-900 uppercase tracking-widest border-b border-blue-200 pb-2 mb-4">Barangay Verification</h3>
@@ -804,8 +763,12 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                       </select>
                     </div>
                     <div className="md:col-span-2">
-                      <label className="text-xs font-semibold text-gray-700 uppercase block mb-1">Review Notes</label>
-                      <textarea 
+                      <label className="text-xs font-semibold text-gray-700 uppercase block mb-1">{isReturnedProfile ? "MSWD Correction Instructions" : "Review Notes (required when returning)"}</label>
+                      <textarea
+                        value={isReturnedProfile ? getCorrectionNotes(selectedProfile.rawDbRow) : reviewNotes}
+                        readOnly={isReturnedProfile}
+                        maxLength={4000}
+                        onChange={event => setReviewNotes(event.target.value)}
                         rows={4} 
                         placeholder="Enter review notes here..." 
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none resize-none"
@@ -823,10 +786,11 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                       Cancel
                     </Button>
                     <Button 
-                      type="submit" 
+                      type="submit"
+                      disabled={profileSaving}
                       className="bg-blue-600 text-white hover:bg-blue-700 gap-2 shadow-sm transition-colors"
                     >
-                      <Save className="size-4" /> Save
+                      <Save className="size-4" /> {isSecretary && selectedProfile.rawDbRow?.status === "RETURNED_FOR_CORRECTION" ? "Resubmit" : "Save"}
                     </Button>
                   </div>
                 ) : (
@@ -834,16 +798,18 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                     <Button 
                       type="button" 
                       variant="outline" 
+                      disabled={profileSaving || isReturnedProfile}
                       onClick={handleReturnToBeneficiary}
                       className="text-amber-700 border-amber-300 hover:bg-amber-50 hover:text-amber-800 gap-2 shadow-sm"
                     >
                       <AlertCircle className="size-4" /> Return to Beneficiary
                     </Button>
                     <Button 
-                      type="submit" 
+                      type="submit"
+                      disabled={profileSaving}
                       className="bg-green-600 text-white hover:bg-green-700 gap-2 shadow-sm transition-colors"
                     >
-                      <CheckCircle2 className="size-4" /> Endorse & Verify
+                      <CheckCircle2 className="size-4" /> {canCorrectReturned ? "Resubmit" : "Endorse & Verify"}
                     </Button>
                   </div>
                 )}
@@ -1007,10 +973,10 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                                   <Button 
                                     variant="outline" 
                                     size="sm" 
-                                    onClick={() => handleOpenWorkflow(record)}
+                                    onClick={() => record.rawDbRow?.status === "RETURNED_FOR_CORRECTION" ? handleEditProfile(record) : handleOpenWorkflow(record)}
                                     className="bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100 font-bold"
                                   >
-                                    View Intake
+                                    {record.rawDbRow?.status === "RETURNED_FOR_CORRECTION" ? "Correct & Resubmit" : "View Intake"}
                                   </Button>
                                 ) : (
                                   <>

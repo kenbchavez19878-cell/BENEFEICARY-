@@ -28,14 +28,6 @@ export async function runMigrations() {
     await client.query(migrationSql);
     console.log('Migration executed successfully!');
 
-    const seedFile = path.resolve(__dirname, '../../../db/seeds/001_seed_cases.sql');
-    if (fs.existsSync(seedFile)) {
-      console.log(`Executing seed data: ${seedFile}`);
-      const seedSql = fs.readFileSync(seedFile, 'utf8');
-      await client.query(seedSql);
-      console.log('Seed data inserted successfully!');
-    }
-
     const womenRes = await client.query('SELECT count(*) FROM women_and_solo_parent_cases');
     const aicsRes = await client.query('SELECT count(*) FROM aics_cases');
     console.log(`Verified table records:`);

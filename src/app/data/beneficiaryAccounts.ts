@@ -4,7 +4,7 @@ export interface BeneficiaryAccount {
   name: string;
   firstName: string;
   username: string;
-  password: string;
+
   role: "Beneficiary";
   profileType: string;
   familyRegistryId: string;
@@ -24,7 +24,7 @@ export const BENEFICIARY_ACCOUNTS: BeneficiaryAccount[] = [
     name: "Maria Cristina Santos Reyes",
     firstName: "Maria Cristina",
     username: "maria.reyes",
-    password: "Beneficiary@2026",
+
     role: "Beneficiary",
     profileType: "Family Beneficiary",
     familyRegistryId: "FAM-2026-00125",
@@ -37,35 +37,6 @@ export const BENEFICIARY_ACCOUNTS: BeneficiaryAccount[] = [
     status: "Verified",
   },
 ];
-
-export function getBeneficiaryByCredentials(
-  usernameInput: string,
-  passwordInput: string
-): BeneficiaryAccount | null {
-  const u = usernameInput.trim().toLowerCase();
-  const p = passwordInput.trim();
-
-  return (
-    BENEFICIARY_ACCOUNTS.find((b) => {
-      const matchUser =
-        b.username.toLowerCase() === u ||
-        b.email.toLowerCase() === u ||
-        b.beneficiaryId.toLowerCase() === u ||
-        u === "beneficiary" ||
-        u === "resident" ||
-        u === "maria.reyes";
-
-      const matchPass =
-        b.password === p ||
-        p === "Beneficiary@2026" ||
-        p === "password" ||
-        p === "123456" ||
-        p === "admin123";
-
-      return matchUser && matchPass && b.status !== "Inactive";
-    }) ?? null
-  );
-}
 
 export function getBeneficiaryById(id: string): BeneficiaryAccount | null {
   return BENEFICIARY_ACCOUNTS.find((b) => b.id === id) ?? null;

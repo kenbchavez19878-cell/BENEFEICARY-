@@ -1,4 +1,6 @@
+import { CALABANGA_BARANGAYS as BARANGAYS } from "../../data/calabangaBarangays";
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { toast } from "sonner";
 import {
   Eye, EyeOff, Shield, ChevronDown, X, Upload, Check,
   Phone, Mail, User, MapPin, FileText, AlertCircle,
@@ -7,18 +9,6 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────
 
-const BARANGAYS = [
-  "Balatasan", "Balombon", "Balongay", "Belen", "Bigaas", "Binaliw",
-  "Binanuaanan Grande", "Binanuaanan Pequeño", "Bonot-Santa Rosa", "Cagsao",
-  "Calabanga (Poblacion)", "Camuning", "Del Carmen", "Dominorog", "Fabrica",
-  "Grijalvo", "Harobay", "La Purisima", "Lugsad", "Magsaysay", "Malacañang",
-  "Manguiring", "Montserrat", "Pagatpat (San Jose)", "Paolbo", "Pinada",
-  "Punta Tarawal", "Quipayo", "Sabang", "Salvacion", "San Antonio",
-  "San Bernardino", "San Francisco", "San Isidro", "San Jose", "San Juan",
-  "San Lucas", "San Miguel (Poblacion)", "San Pablo (Poblacion)", "San Roque",
-  "San Vicente (Poblacion)", "Santa Cruz (Poblacion)", "Santa Fe", "Salingogon",
-  "Sibobo", "Tanauan", "Tomagodtod", "Union",
-];
 
 const STEPS = [
   { num: 1, label: "Account Credentials" },
@@ -406,10 +396,7 @@ export function RegistrationPage({ onBack, onLogin }: {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!privacyConsent) return;
-    setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 1600));
-    setIsSubmitting(false);
-    setShowSuccess(true);
+    toast.info("Online account registration is not available. Please contact your barangay secretary or system administrator to register.");
   }
 
   function clearError(key: string) {
@@ -653,8 +640,7 @@ export function RegistrationPage({ onBack, onLogin }: {
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <Field label="Mobile Number" required error={errors.mobile}
-                hint="This will be used for SMS notifications and application status alerts.">
+              <Field label="Mobile Number" required error={errors.mobile}>
                 <div className="relative">
                   <Phone className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-gray-400" />
                   <input type="tel" value={mobile}

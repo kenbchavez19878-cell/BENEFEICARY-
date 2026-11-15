@@ -1,8 +1,12 @@
-import React, { useState, useEffect } from "react";
+import { ELIGIBILITY_CODES, getWorkflowStepError, workflowStepPayload, nonFinancialKind, releaseMethod, accessibleStep } from "../utils/caseWorkflowData";
+import type { IntakeProfile } from "../utils/intakeProfile";
+import React, { useState, useEffect, useRef } from "react";
+import { useDatabaseHealth } from "../hooks/useDatabaseHealth";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { toast } from "sonner";
+import { getDocumentReviewLabel, getDocumentReviewSummary } from "../utils/documentReviewStatus";
 import { apiUpdateCaseStep, apiGetCaseById, mapDbRecordToCaseData, isSecretaryRole } from "../services/caseService";
 import {
   FileText,
@@ -165,12 +169,16 @@ export interface DocumentCheckItem {
   status: "Valid" | "Incomplete" | "Invalid";
   fileRef?: string;
   fileUrl?: string;
+  reviewed?: boolean;
 }
 
 export interface CaseData {
   id?: number;
   trackingId: string;
   beneficiaryName: string;
+  workflowVersion?: number;
+  completedActivities?: Record<string, string>;
+  applicantProfile?: IntakeProfile;
   beneficiaryId: string;
   barangay: string;
   moduleType: "solo-parent" | "women-vawc" | "aics";
@@ -178,6 +186,7 @@ export interface CaseData {
   endorsementDate: string;
   endorsedBy: string;
   endorsementNotes: string;
+  correctionNotes?: string;
   documents: DocumentCheckItem[];
   socialAssessment: {
     intakeNotes: string;
@@ -201,7 +210,7 @@ export interface CaseData {
     nonMonetarySupport?: string;
   };
   serviceRelease: {
-    releaseMethod: "Cash Payout" | "Check" | "Guarantee Letter / GL";
+    releaseMethod: "Cash Payout" | "Check" | "Guarantee Letter / GL" | "Direct Service" | "Referral";
     guaranteeLetterNumber: string;
     payoutDate: string;
     approvedAmount: number;
@@ -223,137 +232,31 @@ export interface MSWDCaseWorkflowModalProps {
   isReadOnly?: boolean;
 }
 
-const DEFAULT_SOLO_PARENT_DOCS: DocumentCheckItem[] = [
-  { id: "sp-1", name: "PSA Child Birth Certificate", status: "Valid", fileRef: "psa_birth_cert.pdf" },
-  { id: "sp-2", name: "Proof of Solo Parent Status (Death Cert/Court Order/Abandonment Affidavit)", status: "Valid", fileRef: "proof_solo_parent.pdf" },
-  { id: "sp-3", name: "Barangay Indigency/Low Income", status: "Valid", fileRef: "brgy_indigency.pdf" },
-];
-
-const DEFAULT_WOMEN_DOCS: DocumentCheckItem[] = [
-  { id: "w-1", name: "Valid ID", status: "Valid", fileRef: "valid_id.pdf" },
-  { id: "w-2", name: "BPO/Police Blotter", status: "Valid", fileRef: "police_blotter.pdf" },
-  { id: "w-3", name: "Medico-Legal Report", status: "Incomplete", fileRef: "medico_legal.pdf" },
-  { id: "w-4", name: "Barangay Indigency", status: "Valid", fileRef: "brgy_indigency.pdf" },
-];
-
-const DEFAULT_AICS_DOCS: DocumentCheckItem[] = [
-  { id: "a-1", name: "Valid ID", status: "Valid", fileRef: "valid_id.pdf" },
-  { id: "a-2", name: "Indigency", status: "Valid", fileRef: "brgy_indigency.pdf" },
-  { id: "a-3", name: "Hospital SOA/Bills", status: "Valid", fileRef: "hospital_soa.pdf" },
-  { id: "a-4", name: "Doctor's Prescription", status: "Valid", fileRef: "prescription.pdf" },
-  { id: "a-5", name: "Death Cert / Funeral Contract", status: "Incomplete", fileRef: "death_cert.pdf" },
-  { id: "a-6", name: "Transit Request", status: "Incomplete", fileRef: "transit_request.pdf" },
-];
-
-// Helper to construct complete and defended CaseData object
+// Preserve UI state while using one database mapping for persisted fields.
 export function buildSafeCaseData(
   rawItem?: Partial<CaseData> | any,
   fallbackModule: "solo-parent" | "women-vawc" | "aics" = "solo-parent"
 ): CaseData {
-  const modType = normalizeModuleType(rawItem?.moduleType || fallbackModule);
-  const defaultDocs =
-    modType === "solo-parent"
-      ? DEFAULT_SOLO_PARENT_DOCS
-      : modType === "women-vawc"
-      ? DEFAULT_WOMEN_DOCS
-      : DEFAULT_AICS_DOCS;
-
-  const rawStatusCode = (rawItem?.statusCode || rawItem?.status || "BARANGAY_ENDORSED").toString().toUpperCase().replace(/\s+/g, "_");
-  const validStatusList: WorkflowStatusCode[] = [
-    "BARANGAY_ENDORSED", "UNDER_REVIEW", "RETURNED_FOR_CORRECTION",
-    "IN_ASSESSMENT", "ELIGIBILITY_EVALUATED", "APPROVED_FOR_RELEASE",
-    "RELEASED_COMPLETED", "CASE_CLOSED"
-  ];
-  let safeStatusCode: WorkflowStatusCode = "BARANGAY_ENDORSED";
-  if (validStatusList.includes(rawStatusCode as WorkflowStatusCode)) {
-    safeStatusCode = rawStatusCode as WorkflowStatusCode;
-  } else if (rawStatusCode.includes("REVIEW")) {
-    safeStatusCode = "UNDER_REVIEW";
-  } else if (rawStatusCode.includes("ASSESS")) {
-    safeStatusCode = "IN_ASSESSMENT";
-  } else if (rawStatusCode.includes("ELIGIB")) {
-    safeStatusCode = "ELIGIBILITY_EVALUATED";
-  } else if (rawStatusCode.includes("APPROV")) {
-    safeStatusCode = "APPROVED_FOR_RELEASE";
-  } else if (rawStatusCode.includes("RELEASE") || rawStatusCode.includes("COMPLETE")) {
-    safeStatusCode = "RELEASED_COMPLETED";
-  } else if (rawStatusCode.includes("CLOSE")) {
-    safeStatusCode = "CASE_CLOSED";
-  }
-
-  const trackingId = rawItem?.trackingId || rawItem?.case_number || (modType === "aics" ? `AICS-2026-${Math.floor(100000 + Math.random() * 900000)}` : `BEN-2026-${Math.floor(100000 + Math.random() * 900000)}`);
-  const beneficiaryName = rawItem?.beneficiaryName || rawItem?.beneficiary_name || "Beneficiary Client";
-  const beneficiaryId = rawItem?.beneficiaryId || rawItem?.trackingId || rawItem?.case_number || trackingId;
-  const barangay = rawItem?.barangay || rawItem?.barangay_name || "San Juan";
-
+  const mapped = mapDbRecordToCaseData(rawItem, normalizeModuleType(rawItem?.moduleType || fallbackModule));
   return {
-    id: rawItem?.id || 0,
-    trackingId,
-    beneficiaryName,
-    beneficiaryId,
-    barangay,
-    moduleType: modType,
-    statusCode: safeStatusCode,
-    endorsementDate: rawItem?.endorsementDate || (rawItem?.created_at ? new Date(rawItem.created_at).toISOString().split('T')[0] : "2026-10-01"),
-    endorsedBy: rawItem?.endorsedBy || `Barangay Secretary (${barangay})`,
-    endorsementNotes: rawItem?.endorsementNotes || rawItem?.assessment_notes || "Applicant submitted application and supporting documents at Barangay Hall. Endorsed to MSWD for immediate case review and assistance.",
-    documents: Array.isArray(rawItem?.documents) ? rawItem.documents : defaultDocs,
-    socialAssessment: {
-      intakeNotes: rawItem?.socialAssessment?.intakeNotes || rawItem?.assessment_notes || "Client appeared for intake interview. Household socio-economic assessment documented.",
-      caseStudySummary: rawItem?.socialAssessment?.caseStudySummary || rawItem?.assessment_notes || "Social Case Study Report indicates client falls below indigency baseline. Recommended for program assistance.",
-      vulnerabilityLevel: rawItem?.socialAssessment?.vulnerabilityLevel || (rawItem?.vulnerability_level === "HIGH" ? "High" : rawItem?.vulnerability_level === "LOW" ? "Low" : "High"),
-      vulnerabilityNotes: rawItem?.socialAssessment?.vulnerabilityNotes || "Assessed priority vulnerability under municipal welfare guidelines.",
-      assignedSocialWorker: rawItem?.socialAssessment?.assignedSocialWorker || "Juan Miguel Ramos, RSW",
-    },
-    eligibility: {
-      status: rawItem?.eligibility?.status || "Eligible",
-      notes: rawItem?.eligibility?.notes || "Verified eligible under Republic Act statutory requirements and municipal guidelines.",
-      evaluatedDate: rawItem?.eligibility?.evaluatedDate || "2026-10-03",
-    },
-    servicePlan: {
-      spicNumber: rawItem?.servicePlan?.spicNumber || rawItem?.spic_number || (modType === "solo-parent" ? `SPIC-2026-${Math.floor(1000 + Math.random() * 9000)}` : ""),
-      purchaseBookletNumber: rawItem?.servicePlan?.purchaseBookletNumber || rawItem?.booklet_number || "BK-2026-0842",
-      emergencyCashAidAmount: Number(rawItem?.servicePlan?.emergencyCashAidAmount || rawItem?.financial_aid_amount || (modType === "aics" ? 5000 : 3000)),
-      referrals: Array.isArray(rawItem?.servicePlan?.referrals)
-        ? rawItem.servicePlan.referrals
-        : Array.isArray(rawItem?.referrals)
-        ? rawItem.referrals
-        : ["Livelihood Skills Training", "Parenting Effectiveness Seminar (PES)"],
-      crisisType: rawItem?.servicePlan?.crisisType || rawItem?.aics_type || "Medical",
-      approvedFinancialAmount: Number(rawItem?.servicePlan?.approvedFinancialAmount || rawItem?.approved_amount || (modType === "aics" ? 5000 : 3000)),
-      nonMonetarySupport: rawItem?.servicePlan?.nonMonetarySupport || (modType === "aics" ? "Emergency Food Pack + Medical Guarantee Letter" : "Solo Parent Welfare Support"),
-    },
-    serviceRelease: {
-      releaseMethod: rawItem?.serviceRelease?.releaseMethod || (rawItem?.release_method === "GUARANTEE_LETTER" ? "Guarantee Letter / GL" : rawItem?.release_method === "CHECK" ? "Check" : "Cash Payout"),
-      guaranteeLetterNumber: rawItem?.serviceRelease?.guaranteeLetterNumber || rawItem?.guarantee_letter_number || "GL-CAL-2026-00452",
-      payoutDate: rawItem?.serviceRelease?.payoutDate || (rawItem?.payout_date ? String(rawItem.payout_date).split('T')[0] : "2026-10-09"),
-      approvedAmount: Number(rawItem?.serviceRelease?.approvedAmount || rawItem?.approved_amount || (modType === "aics" ? 5000 : 3000)),
-      payoutOfficer: rawItem?.serviceRelease?.payoutOfficer || "Treasury Disbursing Officer",
-      disbursementStatus: rawItem?.serviceRelease?.disbursementStatus || "Ready for Release",
-    },
-    timeline: Array.isArray(rawItem?.timeline) && rawItem.timeline.length > 0
-      ? rawItem.timeline
-      : Array.isArray(rawItem?.monitoring_logs) && rawItem.monitoring_logs.length > 0
-      ? rawItem.monitoring_logs
-      : [
-          {
-            id: "tl-1",
-            date: "2026-10-01 09:15 AM",
-            author: "Barangay Secretary",
-            title: "Barangay Endorsement Recorded",
-            description: `Case forwarded from Barangay ${barangay} to Municipal MSWD Office.`,
-            type: "status",
-          },
-          {
-            id: "tl-2",
-            date: "2026-10-03 01:45 PM",
-            author: "Juan Miguel Ramos, RSW",
-            title: "Initial Intake Interview",
-            description: "Client assessment conducted and social case study notes filed.",
-            type: "visit",
-          },
-        ],
-    closureNotes: rawItem?.closureNotes || "All assistance released and documented. Welfare services successfully administered.",
+    ...mapped,
+    id: rawItem?.id ?? mapped.id,
+    trackingId: rawItem?.trackingId ?? mapped.trackingId,
+    beneficiaryName: rawItem?.beneficiaryName ?? mapped.beneficiaryName,
+    beneficiaryId: rawItem?.beneficiaryId ?? mapped.beneficiaryId,
+    applicantProfile: rawItem?.applicantProfile ?? mapped.applicantProfile,
+    barangay: rawItem?.barangay ?? mapped.barangay,
+    statusCode: rawItem?.statusCode ?? mapped.statusCode,
+    endorsementDate: rawItem?.endorsementDate ?? mapped.endorsementDate,
+    endorsedBy: rawItem?.endorsedBy ?? mapped.endorsedBy,
+    endorsementNotes: rawItem?.endorsementNotes ?? mapped.endorsementNotes,
+    socialAssessment: { ...mapped.socialAssessment, ...rawItem?.socialAssessment },
+    eligibility: { ...mapped.eligibility, ...(typeof rawItem?.eligibility === "object" ? rawItem.eligibility : {}) },
+    servicePlan: { ...mapped.servicePlan, ...rawItem?.servicePlan },
+    serviceRelease: { ...mapped.serviceRelease, ...rawItem?.serviceRelease },
+    timeline: rawItem?.timeline ?? mapped.timeline,
+    closureNotes: rawItem?.closureNotes ?? mapped.closureNotes,
+    caseClosedDate: rawItem?.caseClosedDate ?? mapped.caseClosedDate,
   };
 }
 
@@ -461,57 +364,78 @@ function MSWDCaseWorkflowModalInner({
 
   // PostgreSQL Persistence & Database State
   const [isSaving, setIsSaving] = useState(false);
-  const [dbSyncStatus, setDbSyncStatus] = useState<"synced" | "saving" | "error">("synced");
+  const validationSaveInFlight = useRef(false);
+  const requestInFlight = useRef(false);
+  const workflowVersion = useRef<number | undefined>(caseState.workflowVersion);
+  const { online: databaseOnline, refresh: refreshDatabaseHealth } = useDatabaseHealth(isOpen);
+  const dbSyncStatus = isSaving ? "saving" : databaseOnline === false ? "error" : "synced";
   const [isLoadingCase, setIsLoadingCase] = useState(false);
+  const [correctionNotes, setCorrectionNotes] = useState("");
 
   // Load live case record and audit log history directly from PostgreSQL backend on mount / update
   useEffect(() => {
     if (!isOpen) return;
+    let active = true;
     if (caseItem) {
       setCaseState(buildSafeCaseData(caseItem, effectiveModuleType));
     }
     const targetLookup = caseItem?.trackingId || caseItem?.id || caseItem?.case_number;
+    if (!targetLookup) setIsLoadingCase(false);
     if (targetLookup) {
       setIsLoadingCase(true);
       apiGetCaseById(targetLookup, effectiveModuleType)
         .then((res) => {
-          if (res && res.data) {
+          if (active && res && res.data) {
             const mapped = mapDbRecordToCaseData(res.data, effectiveModuleType);
+            workflowVersion.current = mapped.workflowVersion;
             setCaseState(mapped);
-            setDbSyncStatus("synced");
+            setCorrectionNotes("");
+            setCurrentStep(mapped.statusCode === "CASE_CLOSED" ? 8 : 1);
           }
         })
         .catch((err) => {
           console.warn("[PostgreSQL] Loaded from local cache or props:", err?.message);
+          if (active) refreshDatabaseHealth();
         })
         .finally(() => {
-          setIsLoadingCase(false);
+          if (active) setIsLoadingCase(false);
         });
     }
-  }, [isOpen, caseItem?.trackingId, caseItem?.id, caseItem?.case_number, effectiveModuleType]);
+    return () => { active = false; };
+  }, [isOpen, caseItem?.trackingId, caseItem?.id, caseItem?.case_number, effectiveModuleType, refreshDatabaseHealth]);
 
   // Helper to persist step updates directly to PostgreSQL backend
   const persistStepData = async (stepNumber: number, payload: any) => {
+    if (requestInFlight.current || isSecretary || isLoadingCase) return null;
+    if (caseState.statusCode === "CASE_CLOSED") {
+      toast.info("This case is closed and available for read-only review.");
+      return null;
+    }
+    requestInFlight.current = true;
     setIsSaving(true);
-    setDbSyncStatus("saving");
     try {
       const targetId = caseState.trackingId || caseState.id || caseItem?.trackingId || caseItem?.id;
-      if (!targetId) return null;
+      if (!targetId) throw new Error("No case selected.");
       
       const updatedRow = await apiUpdateCaseStep(targetId, {
         ...payload,
+        expected_version: workflowVersion.current,
         step: stepNumber,
         moduleType: caseState.moduleType,
         author: caseState.socialAssessment.assignedSocialWorker || "MSWD Staff",
       });
-      setDbSyncStatus("synced");
-      setIsSaving(false);
+      workflowVersion.current = updatedRow.workflow_version;
+      setCaseState(current => ({ ...current, workflowVersion: updatedRow.workflow_version, completedActivities: updatedRow.workflow_data?._completed || {} }));
+      refreshDatabaseHealth();
       return updatedRow;
     } catch (err: any) {
       console.error(`[PostgreSQL Error Step ${stepNumber}]:`, err.message);
-      setDbSyncStatus("error");
-      setIsSaving(false);
+      refreshDatabaseHealth();
+      toast.error(err.message || "Could not save this step.");
       return null;
+    } finally {
+      requestInFlight.current = false;
+      setIsSaving(false);
     }
   };
 
@@ -524,9 +448,19 @@ function MSWDCaseWorkflowModalInner({
   const safeDocs = Array.isArray(caseState.documents) ? caseState.documents : [];
   const allDocsValid = safeDocs.length > 0 && safeDocs.every((d) => d.status === "Valid");
   const hasInvalidDocs = safeDocs.some((d) => d.status === "Invalid");
+  const documentReviewSummary = getDocumentReviewSummary(safeDocs, caseState.statusCode);
 
   // Status transition helper with PostgreSQL synchronization
   const updateStatus = async (newCode: WorkflowStatusCode, customDesc?: string, explicitStep?: number) => {
+    if (isSecretary || validationSaveInFlight.current) return false;
+    if (newCode === "RETURNED_FOR_CORRECTION" && !correctionNotes.trim()) {
+      toast.error("Enter the specific corrections or missing requirements before returning this case.");
+      return false;
+    }
+    const stepToPersist = explicitStep !== undefined ? explicitStep : currentStep;
+    const error = getWorkflowStepError(caseState, stepToPersist);
+    if (error) { toast.error(error); return false; }
+    validationSaveInFlight.current = true;
     const safeCfg = getSafeStatusConfig(newCode);
     const newEntry: TimelineEntry = {
       id: `tl-${Date.now()}`,
@@ -544,43 +478,58 @@ function MSWDCaseWorkflowModalInner({
       timeline: [newEntry, ...currentTimeline],
     };
 
-    setCaseState(updated);
-    if (onUpdateCase) onUpdateCase(updated);
-
     // Save status trigger directly to PostgreSQL
-    const stepToPersist = explicitStep !== undefined ? explicitStep : currentStep;
-    await persistStepData(stepToPersist, {
+    const saved = await persistStepData(stepToPersist, {
+      ...workflowStepPayload(caseState, stepToPersist),
+      ...(newCode === "RETURNED_FOR_CORRECTION" ? { correctionNotes: correctionNotes.trim() } : {}),
       status: newCode,
       stepNotes: customDesc,
-      timeline: updated.timeline,
+      action_note: customDesc,
       isCaseClosed: newCode === "CASE_CLOSED",
     });
 
+    validationSaveInFlight.current = false;
+    if (!saved) {
+      return false;
+    }
+    const mapped = mapDbRecordToCaseData(saved, moduleType);
+    const confirmed = { ...updated, statusCode: saved.status, workflowVersion: mapped.workflowVersion, completedActivities: mapped.completedActivities, serviceRelease: mapped.serviceRelease, documents: mapped.documents, correctionNotes: mapped.correctionNotes };
+    setCaseState(confirmed);
+    onUpdateCase?.(confirmed);
     toast.success(`Workflow Status Saved to Database`, {
       description: `PostgreSQL Status: ${safeCfg.label}`,
     });
+    return true;
   };
 
-  // Step 2 toggle handler with direct JSONB persistence to documents_status
+  // Persist explicit review decisions; untouched documents remain pending.
   const handleDocToggle = async (docId: string, status: "Valid" | "Incomplete" | "Invalid") => {
+    if (isSecretary || validationSaveInFlight.current || isLoadingCase) return;
     const currentDocs = Array.isArray(caseState.documents) ? caseState.documents : [];
+    if (!currentDocs.some((doc) => doc.id === docId)) return;
+    validationSaveInFlight.current = true;
     const updated = currentDocs.map((doc) =>
-      doc.id === docId ? { ...doc, status } : doc
+      doc.id === docId ? { ...doc, status, reviewed: true } : doc
     );
-    setCaseState({ ...caseState, documents: updated });
+    setCaseState((current) => ({ ...current, documents: updated }));
 
-    // Build documents_status map for PostgreSQL JSONB
     const docStatusMap: Record<string, string> = {};
-    updated.forEach((d) => {
-      docStatusMap[d.id] = d.status;
-      docStatusMap[d.name] = d.status;
+    updated.filter((doc) => doc.reviewed || doc.status !== "Incomplete").forEach((doc) => {
+      docStatusMap[doc.id] = doc.status;
     });
 
-    await persistStepData(2, {
-      documents_status: docStatusMap,
-      documents: updated,
-    });
-    toast.info(`Document status saved to PostgreSQL: ${status}`);
+    const saved = await persistStepData(2, { documents_status: docStatusMap });
+    validationSaveInFlight.current = false;
+    if (!saved) {
+      setCaseState((current) => ({ ...current, documents: currentDocs }));
+      toast.error("Could not save the document review. Please try again.");
+      return;
+    }
+    const mapped = mapDbRecordToCaseData(saved, moduleType);
+    const confirmed = { ...caseState, workflowVersion: mapped.workflowVersion, completedActivities: mapped.completedActivities, documents: mapped.documents };
+    setCaseState(confirmed);
+    onUpdateCase?.(confirmed);
+    toast.success(`Document review saved: ${getDocumentReviewLabel({ id: docId, name: "", status, reviewed: true }, saved.status)}`);
   };
 
   // Step 7 Add Timeline Entry & Append directly to PostgreSQL monitoring_logs
@@ -602,18 +551,11 @@ function MSWDCaseWorkflowModalInner({
 
     const currentTimeline = Array.isArray(caseState.timeline) ? caseState.timeline : [];
     const updatedTimeline = [entry, ...currentTimeline];
-    setCaseState({
-      ...caseState,
-      timeline: updatedTimeline,
-    });
+    const saved = await persistStepData(7, { monitoring_logs: updatedTimeline });
+    if (!saved) return;
+    setCaseState((current) => ({ ...current, timeline: mapDbRecordToCaseData(saved, moduleType).timeline }));
     setNewLogTitle("");
     setNewLogNote("");
-
-    // Append directly to monitoring_logs in PostgreSQL
-    await persistStepData(7, {
-      new_log_entry: entry,
-      monitoring_logs: updatedTimeline,
-    });
     toast.success("Activity logged and appended to PostgreSQL monitoring_logs!");
   };
 
@@ -629,7 +571,8 @@ function MSWDCaseWorkflowModalInner({
   ];
 
   const currentStatusConfig = getSafeStatusConfig(caseState.statusCode);
-  const isEligibilityUnlocked = caseState.eligibility?.status === "Eligible";
+  const isEligibilityUnlocked = ["Eligible", "For Referral"].includes(caseState.eligibility?.status);
+  const nonFinancialRelease = Boolean(nonFinancialKind(caseState));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto">
@@ -693,13 +636,14 @@ function MSWDCaseWorkflowModalInner({
               {STEPS.map((step) => {
                 const Icon = step.icon;
                 const isActive = activeStep === step.num;
-                const isCompleted = activeStep > step.num;
+                const checkpoint = ["", "endorsementReviewed", "documentsVerified", "assessment", "eligibility", "approval", "release", "monitoring", "closure"][step.num];
+                const isCompleted = Boolean(caseState.completedActivities?.[checkpoint]);
                 const isStep5Locked = step.num === 5 && !isEligibilityUnlocked;
 
                 return (
                   <button
                     key={step.num}
-                    disabled={isStep5Locked && activeStep < 5}
+                    disabled={step.num > accessibleStep(caseState) || (isStep5Locked && activeStep < 5)}
                     onClick={() => setCurrentStep(step.num)}
                     className={`flex flex-col items-center p-1.5 rounded-xl transition-all relative group flex-1 ${
                       isActive
@@ -817,9 +761,21 @@ function MSWDCaseWorkflowModalInner({
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
                   <div>
-                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Beneficiary Name</span>
-                    <p className="font-bold text-gray-900 text-sm">{caseState.beneficiaryName}</p>
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">First Name</span>
+                    <p className="font-bold text-gray-900 text-sm">{caseState.applicantProfile?.firstName || "Not recorded"}</p>
                     <p className="text-[11px] text-gray-500 font-mono">{caseState.trackingId}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Middle Name</span>
+                    <p className="font-bold text-gray-900 text-sm">{caseState.applicantProfile?.middleName || "None provided"}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Last Name</span>
+                    <p className="font-bold text-gray-900 text-sm">{caseState.applicantProfile?.lastName || "Not recorded"}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Extension Name</span>
+                    <p className="font-bold text-gray-900 text-sm">{caseState.applicantProfile?.extensionName || "None provided"}</p>
                   </div>
                   <div>
                     <span className="text-[10px] text-gray-400 uppercase font-semibold">Program / Sector</span>
@@ -835,7 +791,7 @@ function MSWDCaseWorkflowModalInner({
                   <div>
                     <span className="text-[10px] text-gray-400 uppercase font-semibold">Financial Aid Requested</span>
                     <p className="font-bold text-emerald-700 text-sm">
-                      ₱{(Number(caseState.servicePlan?.approvedFinancialAmount || caseState.servicePlan?.emergencyCashAidAmount) || 3000).toLocaleString()}
+                      ₱{(Number(moduleType === "aics" ? caseState.servicePlan?.approvedFinancialAmount : caseState.servicePlan?.emergencyCashAidAmount) || 0).toLocaleString()}
                     </p>
                     <p className="text-[11px] text-gray-500">Municipal Standard Baseline</p>
                   </div>
@@ -846,6 +802,54 @@ function MSWDCaseWorkflowModalInner({
                     </p>
                     <p className="text-[11px] text-gray-500">Encoded for MSWD Verification</p>
                   </div>
+                  <div>
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Date of Birth</span>
+                    <p className="font-bold text-gray-900 text-sm">{caseState.applicantProfile?.birthDate?.replace(/_/g, " ") || "Not recorded"}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Gender</span>
+                    <p className="font-bold text-gray-900 text-sm">{caseState.applicantProfile?.gender?.replace(/_/g, " ") || "Not recorded"}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Civil Status</span>
+                    <p className="font-bold text-gray-900 text-sm">{caseState.applicantProfile?.civilStatus?.replace(/_/g, " ") || "Not recorded"}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Contact Number</span>
+                    <p className="font-bold text-gray-900 text-sm">{caseState.applicantProfile?.contactNumber?.replace(/_/g, " ") || "Not recorded"}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Income / Indigency</span>
+                    <p className="font-bold text-gray-900 text-sm">{(moduleType === "aics" ? caseState.applicantProfile?.incomeStatus : caseState.applicantProfile?.indigencyLevel) || "Not recorded"}</p>
+                  </div>
+                  {moduleType === "solo-parent" && (
+                    <>
+                      <div>
+                        <span className="text-[10px] text-gray-400 uppercase font-semibold">Dependent Children</span>
+                        <p className="font-bold text-gray-900 text-sm">{caseState.applicantProfile?.dependentChildren ?? "Not recorded"}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-400 uppercase font-semibold">Solo Parent Reason</span>
+                        <p className="font-bold text-gray-900 text-sm">{caseState.applicantProfile?.soloParentReason || "Not recorded"}</p>
+                      </div>
+                    </>
+                  )}
+                  {moduleType === "aics" && (
+                    <>
+                      <div>
+                        <span className="text-[10px] text-gray-400 uppercase font-semibold">Crisis Type</span>
+                        <p className="font-bold text-gray-900 text-sm">{caseState.servicePlan.crisisType}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-400 uppercase font-semibold">Crisis Summary</span>
+                        <p className="font-bold text-gray-900 text-sm">{caseState.applicantProfile?.crisisSummary || "Not recorded"}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-400 uppercase font-semibold">Service Provider</span>
+                        <p className="font-bold text-gray-900 text-sm">{caseState.applicantProfile?.serviceProvider || "None provided"}</p>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Scanned/Submitted Document List */}
@@ -864,11 +868,11 @@ function MSWDCaseWorkflowModalInner({
                         <Badge className={`${
                           doc.status === "Valid"
                             ? "bg-emerald-100 text-emerald-800 border-emerald-200"
-                            : doc.status === "Invalid"
+                            : (doc.status === "Invalid" || caseState.statusCode === "RETURNED_FOR_CORRECTION")
                             ? "bg-red-100 text-red-800 border-red-200"
                             : "bg-amber-100 text-amber-800 border-amber-200"
                         } text-[10px] font-semibold`}>
-                          {doc.status}
+                          {getDocumentReviewLabel(doc, caseState.statusCode)}
                         </Badge>
                       </div>
                     ))}
@@ -880,7 +884,7 @@ function MSWDCaseWorkflowModalInner({
               <div className="space-y-1.5 text-xs">
                 <label className="font-bold text-gray-800">Initial Endorsement Notes</label>
                 <div className="w-full p-4 rounded-xl border border-gray-200 bg-gray-50 text-gray-800 text-xs leading-relaxed font-sans">
-                  {caseState.endorsementNotes}
+                  {caseState.statusCode === "RETURNED_FOR_CORRECTION" ? `MSWD correction instructions: ${caseState.correctionNotes || "Please contact MSWD for the correction instructions."}` : caseState.endorsementNotes}
                 </div>
               </div>
 
@@ -904,9 +908,9 @@ function MSWDCaseWorkflowModalInner({
 
                 {!isSecretary ? (
                   <Button
+                    disabled={isSaving || isLoadingCase}
                     onClick={async () => {
-                      await updateStatus("UNDER_REVIEW", "Endorsement acknowledged. Case is now under review in PostgreSQL database.", 1);
-                      setCurrentStep(2);
+                      if (await updateStatus("UNDER_REVIEW", "Endorsement acknowledged. Case is now under review in PostgreSQL database.", 1)) setCurrentStep(2);
                     }}
                     className="bg-blue-900 hover:bg-blue-800 text-white text-xs font-bold px-5 py-2.5 shadow-sm whitespace-nowrap"
                   >
@@ -933,14 +937,14 @@ function MSWDCaseWorkflowModalInner({
                 </div>
                 <Badge
                   className={
-                    allDocsValid
+                    documentReviewSummary.tone === "approved"
                       ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                      : hasInvalidDocs
+                      : documentReviewSummary.tone === "correction"
                       ? "bg-red-100 text-red-800 border-red-300"
                       : "bg-amber-100 text-amber-800 border-amber-300"
                   }
                 >
-                  {allDocsValid ? "All Documents Valid" : hasInvalidDocs ? "Has Invalid Document" : "Review In Progress"}
+                  {documentReviewSummary.label}
                 </Badge>
               </div>
 
@@ -968,7 +972,7 @@ function MSWDCaseWorkflowModalInner({
                         className={`size-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
                           doc.status === "Valid"
                             ? "bg-emerald-50 text-emerald-600"
-                            : doc.status === "Invalid"
+                            : (doc.status === "Invalid" || caseState.statusCode === "RETURNED_FOR_CORRECTION")
                             ? "bg-red-50 text-red-600"
                             : "bg-amber-50 text-amber-600"
                         }`}
@@ -988,18 +992,21 @@ function MSWDCaseWorkflowModalInner({
                           className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
                             doc.status === "Valid"
                               ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                              : doc.status === "Invalid"
+                              : (doc.status === "Invalid" || caseState.statusCode === "RETURNED_FOR_CORRECTION")
                               ? "bg-red-100 text-red-800 border border-red-200"
                               : "bg-amber-100 text-amber-800 border border-amber-200"
                           }`}
                         >
-                          {doc.status}
+                          {getDocumentReviewLabel(doc, caseState.statusCode)}
                         </span>
                       </div>
                     ) : (
                       <div className="flex items-center gap-1.5 self-end sm:self-center">
                         <button
                           type="button"
+                          disabled={isSaving || isLoadingCase}
+                          aria-pressed={Boolean(doc.reviewed || doc.status !== "Incomplete") && doc.status === "Valid"}
+                          title={getDocumentReviewLabel(doc, caseState.statusCode)}
                           onClick={() => handleDocToggle(doc.id, "Valid")}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 ${
                             doc.status === "Valid"
@@ -1012,9 +1019,12 @@ function MSWDCaseWorkflowModalInner({
 
                         <button
                           type="button"
+                          disabled={isSaving || isLoadingCase}
+                          aria-pressed={Boolean(doc.reviewed || doc.status !== "Incomplete") && doc.status === "Incomplete"}
+                          title={getDocumentReviewLabel(doc, caseState.statusCode)}
                           onClick={() => handleDocToggle(doc.id, "Incomplete")}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 ${
-                            doc.status === "Incomplete"
+                            doc.reviewed && doc.status === "Incomplete"
                               ? "bg-amber-600 text-white border-amber-600 shadow-xs"
                               : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-amber-50 hover:text-amber-700"
                           }`}
@@ -1024,6 +1034,9 @@ function MSWDCaseWorkflowModalInner({
 
                         <button
                           type="button"
+                          disabled={isSaving || isLoadingCase}
+                          aria-pressed={Boolean(doc.reviewed || doc.status !== "Incomplete") && doc.status === "Invalid"}
+                          title={getDocumentReviewLabel(doc, caseState.statusCode)}
                           onClick={() => handleDocToggle(doc.id, "Invalid")}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors flex items-center gap-1 ${
                             doc.status === "Invalid"
@@ -1039,6 +1052,12 @@ function MSWDCaseWorkflowModalInner({
                 ))}
               </div>
 
+              {!isSecretary && (
+                <div className="space-y-1.5">
+                  <label htmlFor="case-correction-notes" className="font-bold text-gray-800 text-xs">Correction instructions (required when returning)</label>
+                  <textarea id="case-correction-notes" rows={3} maxLength={4000} value={correctionNotes} onChange={event => setCorrectionNotes(event.target.value)} disabled={isSaving || isLoadingCase} placeholder="Specify what must be corrected and which documents must be replaced or added." className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-xs" />
+                </div>
+              )}
               {/* UI Validation Rule Actions */}
               <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="text-xs space-y-0.5">
@@ -1061,13 +1080,13 @@ function MSWDCaseWorkflowModalInner({
                 {!isSecretary && (
                   <div className="flex items-center gap-2">
                     {/* Shown if any document is marked Invalid */}
-                    {hasInvalidDocs && (
+                    {caseState.statusCode !== "RETURNED_FOR_CORRECTION" && caseState.statusCode !== "CASE_CLOSED" && (
                       <Button
                         type="button"
                         variant="outline"
+                        disabled={isSaving || isLoadingCase}
                         onClick={async () => {
-                          await updateStatus("RETURNED_FOR_CORRECTION", "Documents evaluated as invalid. Case returned to Barangay for correction in PostgreSQL.", 2);
-                          toast.error("Case Marked as RETURNED_FOR_CORRECTION in PostgreSQL");
+                          if (await updateStatus("RETURNED_FOR_CORRECTION", correctionNotes.trim(), 2)) setCurrentStep(1);
                         }}
                         className="border-red-300 bg-red-50 text-red-700 hover:bg-red-100 text-xs font-bold"
                       >
@@ -1077,10 +1096,9 @@ function MSWDCaseWorkflowModalInner({
 
                     {/* Move to Step 3 - ONLY ENABLED IF all docs are marked Valid */}
                     <Button
-                      disabled={!allDocsValid}
+                      disabled={!allDocsValid || isSaving || isLoadingCase}
                       onClick={async () => {
-                        await updateStatus("IN_ASSESSMENT", "Document verification complete. Case moved to in-depth assessment in PostgreSQL.", 2);
-                        setCurrentStep(3);
+                        if (await updateStatus("IN_ASSESSMENT", "Document verification complete. Case moved to in-depth assessment in PostgreSQL.", 2)) setCurrentStep(3);
                       }}
                       className={`text-xs font-bold px-5 py-2.5 ${
                         allDocsValid
@@ -1107,7 +1125,7 @@ function MSWDCaseWorkflowModalInner({
                   </h3>
                 </div>
                 <Badge className="bg-purple-100 text-purple-800 border-purple-200">
-                  Status: IN_ASSESSMENT
+                  Status: {caseState.statusCode}
                 </Badge>
               </div>
 
@@ -1208,19 +1226,21 @@ function MSWDCaseWorkflowModalInner({
 
                 {!isSecretary ? (
                   <Button
+                    disabled={isSaving || isLoadingCase}
                     onClick={async () => {
-                      const combinedNotes = [
-                        caseState.socialAssessment.intakeNotes ? `Intake: ${caseState.socialAssessment.intakeNotes}` : null,
-                        caseState.socialAssessment.caseStudySummary ? `Assessment: ${caseState.socialAssessment.caseStudySummary}` : null,
-                      ].filter(Boolean).join('\n\n');
-
-                      await persistStepData(3, {
-                        assessment_notes: combinedNotes,
-                        vulnerability_level: (caseState.socialAssessment?.vulnerabilityLevel || "HIGH").toUpperCase(),
-                        socialAssessment: caseState.socialAssessment,
-                      });
-                      toast.success("Social assessment notes persisted to PostgreSQL database!");
-                      setCurrentStep(4);
+                      const error = getWorkflowStepError(caseState, 3);
+                      if (error) { toast.error(error); return; }
+                      if (moduleType === "aics") {
+                        const interview = await persistStepData(3, { intakeInterview: {
+                          notes: caseState.socialAssessment.intakeNotes,
+                          interviewer: caseState.socialAssessment.assignedSocialWorker,
+                        } });
+                        if (!interview) return;
+                      }
+                      if (await persistStepData(3, workflowStepPayload(caseState, 3))) {
+                        toast.success("Social assessment saved.");
+                        setCurrentStep(4);
+                      }
                     }}
                     className="bg-indigo-900 hover:bg-indigo-800 text-white text-xs font-bold px-5 py-2.5 shadow-sm"
                   >
@@ -1246,7 +1266,7 @@ function MSWDCaseWorkflowModalInner({
                   </h3>
                 </div>
                 <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200 font-bold">
-                  Status: ELIGIBILITY_EVALUATED
+                  Status: {caseState.statusCode}
                 </Badge>
               </div>
 
@@ -1278,6 +1298,7 @@ function MSWDCaseWorkflowModalInner({
                         <button
                           key={item.key}
                           type="button"
+                          disabled={isSaving || isLoadingCase}
                           onClick={async () => {
                             const updated = {
                               ...caseState,
@@ -1286,17 +1307,17 @@ function MSWDCaseWorkflowModalInner({
                                 status: item.key as any,
                               },
                             };
+                            if (isSaving) return;
                             setCaseState(updated);
-                            await persistStepData(4, {
-                              eligibility: item.key,
-                              status: 'ELIGIBILITY_EVALUATED',
-                              notes: caseState.eligibility?.notes || "",
+                            const saved = await persistStepData(4, {
+                              eligibility: ELIGIBILITY_CODES[item.key],
+                              eligibilityDetails: updated.eligibility,
                             });
-                            if (item.key === "Eligible") {
-                              toast.success("Client marked Eligible & saved to PostgreSQL — Step 5 unlocked!");
-                            } else {
-                              toast.warning(`Eligibility saved to PostgreSQL: ${item.key}`);
+                            if (!saved) {
+                              setCaseState((current) => ({ ...current, eligibility: caseState.eligibility }));
+                              return;
                             }
+                            toast.success(`Eligibility saved: ${item.key}`);
                           }}
                           className={`p-3.5 rounded-xl border text-xs font-bold flex flex-col items-center text-center gap-2 transition-all cursor-pointer ${
                             isSelected
@@ -1356,9 +1377,8 @@ function MSWDCaseWorkflowModalInner({
                 {!isSecretary && (
                   <Button
                     disabled={!isEligibilityUnlocked}
-                    onClick={() => {
-                      updateStatus("ELIGIBILITY_EVALUATED", "Eligibility evaluation confirmed. Service planning initiated.");
-                      setCurrentStep(5);
+                    onClick={async () => {
+                      if (await updateStatus("ELIGIBILITY_EVALUATED", "Eligibility evaluation confirmed. Service planning initiated.", 4)) setCurrentStep(5);
                     }}
                     className={`text-xs font-bold px-5 py-2.5 ${
                       isEligibilityUnlocked
@@ -1384,7 +1404,7 @@ function MSWDCaseWorkflowModalInner({
                   </h3>
                 </div>
                 <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 font-bold">
-                  Status: APPROVED_FOR_RELEASE
+                  Status: {caseState.statusCode}
                 </Badge>
               </div>
 
@@ -1601,19 +1621,9 @@ function MSWDCaseWorkflowModalInner({
 
                 {!isSecretary ? (
                   <Button
+                    disabled={isSaving || isLoadingCase}
                     onClick={async () => {
-                      await persistStepData(5, {
-                        status: "APPROVED_FOR_RELEASE",
-                        spic_number: caseState.servicePlan?.spicNumber || null,
-                        booklet_number: caseState.servicePlan?.purchaseBookletNumber || null,
-                        financial_aid_amount: caseState.servicePlan?.emergencyCashAidAmount || 0,
-                        approved_amount: caseState.servicePlan?.approvedFinancialAmount || 0,
-                        referrals: Array.isArray(caseState.servicePlan?.referrals) ? caseState.servicePlan.referrals : [],
-                        crisisType: caseState.servicePlan?.crisisType || "Medical",
-                        servicePlan: caseState.servicePlan,
-                      });
-                      await updateStatus("APPROVED_FOR_RELEASE", "Service plan formulated and approved for financial release in PostgreSQL database.", 5);
-                      setCurrentStep(6);
+                      if (await updateStatus("APPROVED_FOR_RELEASE", "Service plan approved for release.", 5)) setCurrentStep(6);
                     }}
                     className="bg-emerald-900 hover:bg-emerald-800 text-white text-xs font-bold px-5 py-2.5 shadow-sm"
                   >
@@ -1639,7 +1649,7 @@ function MSWDCaseWorkflowModalInner({
                   </h3>
                 </div>
                 <Badge className="bg-green-100 text-green-800 border-green-300 font-bold">
-                  Status: RELEASED_COMPLETED
+                  Status: {caseState.statusCode}
                 </Badge>
               </div>
 
@@ -1648,7 +1658,7 @@ function MSWDCaseWorkflowModalInner({
                 <div className="space-y-1.5">
                   <label className="font-bold text-gray-800">Release Method</label>
                   <select
-                    value={caseState.serviceRelease?.releaseMethod || "Cash Payout"}
+                    value={releaseMethod(caseState)}
                     onChange={(e) =>
                       setCaseState({
                         ...caseState,
@@ -1660,9 +1670,9 @@ function MSWDCaseWorkflowModalInner({
                     }
                     className="w-full h-10 px-3 border border-gray-300 rounded-lg bg-white font-bold text-blue-900"
                   >
-                    <option value="Cash Payout">Cash Payout</option>
-                    <option value="Check">Check</option>
-                    <option value="Guarantee Letter / GL">Guarantee Letter / GL</option>
+                    <option value={nonFinancialRelease ? "Direct Service" : "Cash Payout"}>{nonFinancialRelease ? "Direct Service" : "Cash Payout"}</option>
+                    <option value={nonFinancialRelease ? "Referral" : "Check"}>{nonFinancialRelease ? "Referral" : "Check"}</option>
+                    <option value="Guarantee Letter / GL" disabled={nonFinancialRelease}>Guarantee Letter / GL</option>
                   </select>
                 </div>
 
@@ -1704,6 +1714,22 @@ function MSWDCaseWorkflowModalInner({
                     className="w-full h-10 px-3 border border-gray-300 rounded-lg bg-white font-bold"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="release-payout-officer" className="font-bold text-gray-800">Payout Officer / Accountable Service Officer *</label>
+                <input
+                  id="release-payout-officer"
+                  type="text"
+                  required
+                  maxLength={150}
+                  value={caseState.serviceRelease.payoutOfficer}
+                  onChange={(event) => setCaseState(current => ({
+                    ...current,
+                    serviceRelease: { ...current.serviceRelease, payoutOfficer: event.target.value },
+                  }))}
+                  className="w-full h-10 px-3 border border-gray-300 rounded-lg bg-white font-bold"
+                />
               </div>
 
               {/* Printable Templates and Previews */}
@@ -1751,17 +1777,9 @@ function MSWDCaseWorkflowModalInner({
 
                 {!isSecretary ? (
                   <Button
+                    disabled={isSaving || isLoadingCase}
                     onClick={async () => {
-                      await persistStepData(6, {
-                        status: "RELEASED_COMPLETED",
-                        serviceRelease: caseState.serviceRelease,
-                        release_method: caseState.serviceRelease?.releaseMethod || "Cash Payout",
-                        guarantee_letter_number: caseState.serviceRelease?.guaranteeLetterNumber || null,
-                        payout_date: caseState.serviceRelease?.payoutDate || null,
-                        approved_amount: caseState.serviceRelease?.approvedAmount || 0,
-                      });
-                      await updateStatus("RELEASED_COMPLETED", "Financial aid and official credentials recorded as RELEASED_COMPLETED in PostgreSQL database.", 6);
-                      setCurrentStep(7);
+                      if (await updateStatus("RELEASED_COMPLETED", "Assistance release recorded.", 6)) setCurrentStep(7);
                     }}
                     className="bg-green-700 hover:bg-green-800 text-white text-xs font-bold px-5 py-2.5 shadow-sm"
                   >
@@ -1865,7 +1883,7 @@ function MSWDCaseWorkflowModalInner({
 
                 {!isSecretary ? (
                   <Button
-                    onClick={() => setCurrentStep(8)}
+                    onClick={() => caseState.completedActivities?.monitoring ? setCurrentStep(8) : toast.error("Save a monitoring update before closure.")}
                     className="bg-gray-800 hover:bg-gray-900 text-white text-xs font-bold px-5 py-2.5"
                   >
                     Proceed to Step 8 (Case Closure) →
@@ -1885,8 +1903,8 @@ function MSWDCaseWorkflowModalInner({
 
           {/* ═════ STEP 8: CASE CLOSURE ═════ */}
           {!isSecretary && activeStep === 8 && (
-            <div className="space-y-5">
-              <div className="flex items-center justify-between border-b border-gray-200 pb-3">
+            <div data-case-summary-print className="space-y-5">
+              <div data-case-summary-print-exclude className="flex items-center justify-between border-b border-gray-200 pb-3">
                 <div className="flex items-center gap-2">
                   <Lock className="size-5 text-blue-800" />
                   <h3 className="text-base font-extrabold text-blue-950">
@@ -1979,6 +1997,7 @@ function MSWDCaseWorkflowModalInner({
               {/* Closure Notes */}
               <div className="space-y-1.5 text-xs">
                 <label className="font-bold text-gray-800">Final Outcome & Archiving Remarks</label>
+                <p data-case-summary-print-remarks className="hidden">{caseState.closureNotes || "No archiving remarks recorded."}</p>
                 <textarea
                   rows={2}
                   readOnly={isSecretary}
@@ -1990,7 +2009,7 @@ function MSWDCaseWorkflowModalInner({
               </div>
 
               {/* Action Banner */}
-              <div className="p-5 bg-gradient-to-r from-gray-900 to-blue-950 text-white rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md">
+              <div data-case-summary-print-exclude className="p-5 bg-gradient-to-r from-gray-900 to-blue-950 text-white rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md">
                 <div className="text-xs space-y-1">
                   <p className="font-bold text-sm text-white">Final Actions: Print & Close Case</p>
                   <p className="text-blue-200">
@@ -2016,15 +2035,10 @@ function MSWDCaseWorkflowModalInner({
                   {/* Close Case Button (Validator Only) */}
                   {!isSecretary && (
                     <Button
+                    disabled={isSaving || isLoadingCase || caseState.statusCode === "CASE_CLOSED"}
                       type="button"
                       onClick={async () => {
-                        await persistStepData(8, {
-                          status: "CASE_CLOSED",
-                          isCaseClosed: true,
-                          closureNotes: caseState.closureNotes,
-                        });
-                        await updateStatus("CASE_CLOSED", "Case sealed, validated, and officially archived as CASE_CLOSED in PostgreSQL database.", 8);
-                        toast.success("Case successfully marked as CASE_CLOSED in PostgreSQL database!");
+                        if (await updateStatus("CASE_CLOSED", "Case closed and archived.", 8)) toast.success("Case closed successfully.");
                       }}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-5 py-2.5 shadow-sm"
                     >
@@ -2072,8 +2086,12 @@ function MSWDCaseWorkflowModalInner({
 
               <Button
                 size="sm"
-                disabled={activeStep === 8 || (activeStep === 4 && !isEligibilityUnlocked)}
-                onClick={() => setCurrentStep((prev) => Math.min(8, prev + 1))}
+                disabled={isSaving || activeStep >= accessibleStep(caseState) || activeStep === 8 || (activeStep === 2 && !allDocsValid) || (activeStep === 4 && !isEligibilityUnlocked)}
+                onClick={() => {
+                  const error = getWorkflowStepError(caseState, activeStep);
+                  if (error) { toast.error(error); return; }
+                  setCurrentStep((prev) => Math.min(8, prev + 1));
+                }}
                 className="bg-blue-900 hover:bg-blue-800 text-white text-xs"
               >
                 Next Step <ChevronRight className="size-4 ml-1" />

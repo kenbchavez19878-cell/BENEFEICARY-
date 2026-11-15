@@ -4,6 +4,7 @@ Production-ready configuration connected to PostgreSQL with DRF and CORS.
 """
 
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -17,7 +18,7 @@ load_dotenv(BASE_DIR / '.env')
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-replace-with-a-secure-secret-key-in-prod')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'True').lower() in ('true', '1', 't')
+DEBUG = os.getenv('DJANGO_DEBUG', os.getenv('DEBUG', 'True')).lower() in ('true', '1', 't')
 
 # Allowed hosts configuration
 raw_allowed_hosts = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0,testserver')
@@ -84,7 +85,9 @@ DATABASES = {
         'PASSWORD': os.getenv('DB_PASSWORD', 'postgres'),
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
-        'CONN_MAX_AGE': 60,
+        'CONN_MAX_AGE': 0 if DEBUG else int(os.getenv('DB_CONN_MAX_AGE', '0')),
+        'CONN_HEALTH_CHECKS': True,
+        'OPTIONS': {'connect_timeout': 5},
     }
 }
 
@@ -123,8 +126,10 @@ APPEND_SLASH = False
 
 # Django REST Framework Configuration
 REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': ['rest_framework.authentication.SessionAuthentication'],
+    'EXCEPTION_HANDLER': 'api.exceptions.api_exception_handler',
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',
+        'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
@@ -145,3 +150,13 @@ REST_FRAMEWORK = {
 raw_cors_origins = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:5173')
 CORS_ALLOWED_ORIGINS = [origin.strip() for origin in raw_cors_origins.split(',') if origin.strip()]
 CORS_ALLOW_CREDENTIALS = True
+
+CSRF_TRUSTED_ORIGINS = [value.strip() for value in os.getenv("CSRF_TRUSTED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if value.strip()]
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SECURE = not DEBUG and "test" not in sys.argv
+CSRF_COOKIE_SECURE = not DEBUG and "test" not in sys.argv
+SECURE_SSL_REDIRECT = not DEBUG and "test" not in sys.argv
+SECURE_HSTS_SECONDS = 0 if DEBUG else 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = not DEBUG

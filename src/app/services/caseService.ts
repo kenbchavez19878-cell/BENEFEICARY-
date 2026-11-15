@@ -1,3 +1,5 @@
+import { authFetch } from "./authService";
+import { mapIntakeProfile, mapNameFields, type SeparatedNameFields } from "../utils/intakeProfile";
 import type { CaseData, DocumentCheckItem, TimelineEntry, WorkflowStatusCode } from "../components/MSWDCaseWorkflowModal";
 
 export interface IntakeDocument {
@@ -18,9 +20,28 @@ function intakeRequest(data: object, documents: IntakeDocument[] = []): RequestI
 }
 
 export interface DbCaseRecord {
+  correction_notes?: string;
   id?: number;
+  workflow_version?: number;
+  payout_officer_name?: string;
   case_number: string;
   beneficiary_name: string;
+  first_name?: string;
+  middle_name?: string;
+  last_name?: string;
+  extension_name?: string;
+  gender?: string;
+  civil_status?: string;
+  birth_date?: string;
+  contact_number?: string;
+  income_status?: string;
+  indigency_level?: string;
+  dependent_children?: number;
+  solo_parent_reason?: string;
+  crisis_summary?: string;
+  service_provider?: string;
+  intake_notes?: string;
+  workflow_data?: Record<string, any>;
   barangay_name: string;
   category?: 'SOLO_PARENT' | 'WOMEN_VAWC';
   aics_type?: 'MEDICAL' | 'BURIAL' | 'TRANSPORTATION' | 'ECONOMIC_RELIEF' | 'BALIK_PROBINSYA';
@@ -46,6 +67,7 @@ export interface DbCaseRecord {
 // Convert DB record to UI CaseData
 export function mapDbRecordToCaseData(row: DbCaseRecord | null | undefined, moduleTypeHint?: 'solo-parent' | 'women-vawc' | 'aics'): CaseData {
   const safeRow: any = row || {};
+  const workflow = safeRow.workflow_data || {};
   let moduleType: 'solo-parent' | 'women-vawc' | 'aics' = 'solo-parent';
   if (safeRow.aics_type) {
     moduleType = 'aics';
@@ -61,6 +83,7 @@ export function mapDbRecordToCaseData(row: DbCaseRecord | null | undefined, modu
     ? safeRow.documents.map((doc: DocumentCheckItem) => ({
         ...doc,
         status: safeRow.documents_status?.[doc.id] || doc.status || "Incomplete",
+        reviewed: doc.reviewed ?? Object.prototype.hasOwnProperty.call(safeRow.documents_status || {}, doc.id),
       }))
     : [];
 
@@ -70,14 +93,17 @@ export function mapDbRecordToCaseData(row: DbCaseRecord | null | undefined, modu
   else if (safeRow.vulnerability_level === 'LOW') vuln = 'Low';
 
   // Map Eligibility
-  let eligStatus: "Eligible" | "Not Eligible" | "Additional Requirements Needed" | "For Referral" | "" = "Eligible";
-  if (safeRow.eligibility === 'NOT_ELIGIBLE') eligStatus = 'Not Eligible';
+  let eligStatus: "Eligible" | "Not Eligible" | "Additional Requirements Needed" | "For Referral" | "" = "";
+  if (safeRow.eligibility === 'ELIGIBLE') eligStatus = 'Eligible';
+  else if (safeRow.eligibility === 'NOT_ELIGIBLE') eligStatus = 'Not Eligible';
   else if (safeRow.eligibility === 'ADDITIONAL_REQUIREMENTS') eligStatus = 'Additional Requirements Needed';
   else if (safeRow.eligibility === 'FOR_REFERRAL') eligStatus = 'For Referral';
 
   // Map Release Method
-  let relMethod: "Cash Payout" | "Check" | "Guarantee Letter / GL" = "Cash Payout";
-  if (safeRow.release_method === 'CHECK') relMethod = 'Check';
+  let relMethod: CaseData["serviceRelease"]["releaseMethod"] = "Cash Payout";
+  if (safeRow.release_method === 'DIRECT_SERVICE') relMethod = 'Direct Service';
+  else if (safeRow.release_method === 'REFERRAL') relMethod = 'Referral';
+  else if (safeRow.release_method === 'CHECK') relMethod = 'Check';
   else if (safeRow.release_method === 'GUARANTEE_LETTER') relMethod = 'Guarantee Letter / GL';
 
   // Map AICS crisis type
@@ -87,7 +113,7 @@ export function mapDbRecordToCaseData(row: DbCaseRecord | null | undefined, modu
   else if (safeRow.aics_type === 'ECONOMIC_RELIEF') crisis = 'Economic Relief';
   else if (safeRow.aics_type === 'BALIK_PROBINSYA') crisis = 'Balik Probinsya';
 
-  const amount = Number(safeRow.financial_aid_amount || safeRow.approved_amount || (moduleType === 'aics' ? 5000 : 3000));
+  const amount = Number(safeRow.financial_aid_amount ?? safeRow.approved_amount ?? 0);
   const trackingNumber = safeRow.case_number || `BEN-2026-${Math.floor(100000 + Math.random() * 900000)}`;
   const beneficiaryName = safeRow.beneficiary_name || safeRow.fullName || "Beneficiary Client";
   const barangayName = safeRow.barangay_name || safeRow.barangay || "San Juan";
@@ -119,57 +145,57 @@ export function mapDbRecordToCaseData(row: DbCaseRecord | null | undefined, modu
     id: safeRow.id || 0,
     trackingId: trackingNumber,
     beneficiaryName,
+    workflowVersion: safeRow.workflow_version,
+    completedActivities: workflow._completed || {},
+    applicantProfile: mapIntakeProfile(safeRow),
     beneficiaryId: trackingNumber,
     barangay: barangayName,
     moduleType,
     statusCode: safeStatusCode,
     endorsementDate: safeRow.created_at ? new Date(safeRow.created_at).toISOString().split('T')[0] : '2026-10-01',
     endorsedBy: `Barangay Secretary (${barangayName})`,
-    endorsementNotes: safeRow.assessment_notes || "Barangay endorsement and case documentation submitted for MSWD intake evaluation.",
+    endorsementNotes: (safeRow.intake_notes ?? safeRow.assessment_notes) || safeRow.crisis_summary || "No endorsement notes provided.",
+    correctionNotes: getCorrectionNotes(safeRow),
     documents,
     socialAssessment: {
-      intakeNotes: safeRow.assessment_notes || "Client intake interview conducted. Household socio-economic assessment documented.",
-      caseStudySummary: safeRow.assessment_notes || "Social Case Study Report filed recommending municipal welfare intervention.",
-      vulnerabilityLevel: vuln,
-      vulnerabilityNotes: `Assessed ${vuln.toLowerCase()} vulnerability prioritization.`,
-      assignedSocialWorker: "Juan Miguel Ramos, RSW",
+      intakeNotes: workflow.socialAssessment?.intakeNotes ?? workflow.intakeInterview?.notes ?? "",
+      caseStudySummary: workflow.socialAssessment?.caseStudySummary ?? "",
+      vulnerabilityLevel: workflow.socialAssessment?.vulnerabilityLevel ?? vuln,
+      vulnerabilityNotes: workflow.socialAssessment?.vulnerabilityNotes ?? "",
+      assignedSocialWorker: workflow.socialAssessment?.assignedSocialWorker ?? workflow.intakeInterview?.interviewer ?? "",
     },
     eligibility: {
       status: eligStatus,
-      notes: "Assessed under official Municipal Social Welfare guidelines and Republic Act statutory requirements.",
-      evaluatedDate: safeRow.updated_at ? new Date(safeRow.updated_at).toISOString().split('T')[0] : '2026-10-03',
+      notes: workflow.eligibilityDetails?.notes ?? "",
+      evaluatedDate: workflow.eligibilityDetails?.evaluatedDate ?? undefined,
     },
     servicePlan: {
-      spicNumber: safeRow.spic_number || (moduleType === 'solo-parent' ? `SPIC-2026-1082` : ''),
-      purchaseBookletNumber: safeRow.booklet_number || 'BK-2026-0842',
-      emergencyCashAidAmount: amount,
-      referrals: Array.isArray(safeRow.referrals) ? safeRow.referrals : ["Livelihood Skills Training", "Parenting Effectiveness Seminar (PES)"],
+      spicNumber: safeRow.spic_number ?? '',
+      purchaseBookletNumber: safeRow.booklet_number ?? '',
+      emergencyCashAidAmount: Number(workflow.servicePlan?.emergencyCashAidAmount ?? amount),
+      referrals: Array.isArray(safeRow.referrals) ? safeRow.referrals : (workflow.servicePlan?.referrals || []),
       crisisType: crisis,
-      approvedFinancialAmount: amount,
-      nonMonetarySupport: moduleType === 'aics' ? 'Medical Guarantee Letter + Food Subsidy' : 'Solo Parent Welfare Support',
+      approvedFinancialAmount: Number(workflow.servicePlan?.approvedFinancialAmount ?? amount),
+      nonMonetarySupport: workflow.servicePlan?.nonMonetarySupport ?? "",
     },
     serviceRelease: {
       releaseMethod: relMethod,
-      guaranteeLetterNumber: safeRow.guarantee_letter_number || 'GL-CAL-2026-00452',
-      payoutDate: safeRow.payout_date ? String(safeRow.payout_date).split('T')[0] : '2026-10-15',
-      approvedAmount: amount,
-      payoutOfficer: "Treasury Disbursing Officer",
+      guaranteeLetterNumber: safeRow.guarantee_letter_number ?? workflow.serviceRelease?.guaranteeLetterNumber ?? '',
+      payoutDate: safeRow.payout_date ? String(safeRow.payout_date).split('T')[0] : '',
+      approvedAmount: Number(workflow.serviceRelease?.approvedAmount ?? amount),
+      payoutOfficer: safeRow.payout_officer_name || workflow.serviceRelease?.payoutOfficer || "",
       disbursementStatus: safeRow.status === 'RELEASED_COMPLETED' || safeRow.status === 'CASE_CLOSED' ? 'Disbursed / Completed' : 'Pending Payout',
     },
-    timeline: (safeRow.monitoring_logs && Array.isArray(safeRow.monitoring_logs) && safeRow.monitoring_logs.length > 0)
-      ? safeRow.monitoring_logs
-      : [
-          {
-            id: 'tl-1',
-            date: '2026-10-01 09:15 AM',
-            author: 'Barangay Secretary',
-            title: 'Barangay Endorsement Recorded',
-            description: `Case forwarded from Barangay ${barangayName} to Municipal MSWD Office.`,
-            type: 'status',
-          },
-        ],
-    caseClosedDate: safeRow.status === 'CASE_CLOSED' ? (safeRow.updated_at ? new Date(safeRow.updated_at).toISOString().split('T')[0] : '2026-10-09') : undefined,
-    closureNotes: safeRow.status === 'CASE_CLOSED' ? 'All case objectives achieved. Case officially closed and archived.' : undefined,
+    timeline: Array.isArray(safeRow.monitoring_logs) ? safeRow.monitoring_logs.map((log: any) => ({
+      id: log.id,
+      date: log.date ?? log.timestamp ?? "",
+      author: log.author ?? log.performed_by ?? "",
+      title: log.title ?? log.action ?? "",
+      description: log.description ?? log.note ?? "",
+      type: log.type ?? "status",
+    })) : [],
+    caseClosedDate: safeRow.status === 'CASE_CLOSED' ? (safeRow.updated_at ? new Date(safeRow.updated_at).toISOString().split('T')[0] : undefined) : undefined,
+    closureNotes: workflow.closureNotes ?? '',
   };
 }
 
@@ -189,47 +215,51 @@ function extractErrorMessage(errorJson: any, fallback: string): string {
 }
 
 // 1. Fetch Women & Solo Parent Cases
-export async function apiGetWomenSoloParentCases(filters?: { status?: string; category?: string; search?: string; barangay?: string }) {
+export async function apiGetWomenSoloParentCases(filters?: { status?: string; category?: string; search?: string; barangay?: string; queue?: "secretary" }) {
   const params = new URLSearchParams();
   if (filters?.status && filters.status !== 'all') params.set('status', filters.status);
   if (filters?.category && filters.category !== 'all') params.set('category', filters.category);
   if (filters?.search) params.set('search', filters.search);
   if (filters?.barangay && filters.barangay !== 'all') params.set('barangay', filters.barangay);
+  if (filters?.queue) params.set('queue', filters.queue);
 
   const url = `/api/cases/women-solo-parent${params.toString() ? `?${params.toString()}` : ''}`;
-  const res = await fetch(url);
+  const res = await authFetch(url, { cache: 'no-store' });
   if (!res.ok) {
     const errorJson = await res.json().catch(() => ({}));
     throw new Error(extractErrorMessage(errorJson, `Failed to fetch women & solo parent cases: ${res.statusText}`));
   }
   const json = await res.json();
-  const list = Array.isArray(json.data) ? json.data : Array.isArray(json.results) ? json.results : Array.isArray(json) ? json : [];
+  const list = Array.isArray(json.data) ? json.data : Array.isArray(json.results) ? json.results : Array.isArray(json) ? json : null;
+  if (list === null) throw new Error('Invalid case-list response. Please try again.');
   return list as DbCaseRecord[];
 }
 
 // 2. Fetch AICS Cases
-export async function apiGetAicsCases(filters?: { status?: string; aics_type?: string; search?: string; barangay?: string }) {
+export async function apiGetAicsCases(filters?: { status?: string; aics_type?: string; search?: string; barangay?: string; queue?: "secretary" }) {
   const params = new URLSearchParams();
   if (filters?.status && filters.status !== 'all') params.set('status', filters.status);
   if (filters?.aics_type && filters.aics_type !== 'all') params.set('aics_type', filters.aics_type);
   if (filters?.search) params.set('search', filters.search);
   if (filters?.barangay && filters.barangay !== 'all') params.set('barangay', filters.barangay);
+  if (filters?.queue) params.set('queue', filters.queue);
 
   const url = `/api/cases/aics${params.toString() ? `?${params.toString()}` : ''}`;
-  const res = await fetch(url);
+  const res = await authFetch(url, { cache: 'no-store' });
   if (!res.ok) {
     const errorJson = await res.json().catch(() => ({}));
     throw new Error(extractErrorMessage(errorJson, `Failed to fetch AICS cases: ${res.statusText}`));
   }
   const json = await res.json();
-  const list = Array.isArray(json.data) ? json.data : Array.isArray(json.results) ? json.results : Array.isArray(json) ? json : [];
+  const list = Array.isArray(json.data) ? json.data : Array.isArray(json.results) ? json.results : Array.isArray(json) ? json : null;
+  if (list === null) throw new Error('Invalid case-list response. Please try again.');
   return list as DbCaseRecord[];
 }
 
 // 3. Fetch Case Record & Audit Log by ID
 export async function apiGetCaseById(idOrCaseNumber: string | number, moduleHint?: string) {
   const url = `/api/cases/${encodeURIComponent(String(idOrCaseNumber))}${moduleHint ? `?module=${encodeURIComponent(moduleHint)}` : ''}`;
-  const res = await fetch(url);
+  const res = await authFetch(url, { cache: 'no-store' });
   if (!res.ok) {
     const errorJson = await res.json().catch(() => ({}));
     throw new Error(extractErrorMessage(errorJson, `Failed to fetch case ${idOrCaseNumber}: ${res.statusText}`));
@@ -237,16 +267,39 @@ export async function apiGetCaseById(idOrCaseNumber: string | number, moduleHint
   return await res.json();
 }
 
+// Save individual attributes without replacing them with a formatted display name.
+export async function apiUpdateCaseNames(
+  idOrCaseNumber: string | number,
+  names: SeparatedNameFields,
+  module: 'women-solo-parent' | 'aics',
+): Promise<DbCaseRecord> {
+  const res = await authFetch(`/api/cases/${module}/${encodeURIComponent(String(idOrCaseNumber))}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(mapNameFields(names)),
+  });
+  if (!res.ok) {
+    const errorJson = await res.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(errorJson, 'Could not save beneficiary name fields.'));
+  }
+  const json = await res.json();
+  notifyDataUpdated();
+  return (json.data || json) as DbCaseRecord;
+}
+
 // 4. Update Step & Persist to PostgreSQL (Steps 1 to 8)
-export async function apiUpdateCaseStep(idOrCaseNumber: string | number, payload: any) {
-  const url = `/api/cases/${encodeURIComponent(String(idOrCaseNumber))}/step`;
-  const res = await fetch(url, {
+export async function apiUpdateCaseStep(idOrCaseNumber: string | number, payload: any, documents: IntakeDocument[] = []) {
+  const hint = payload.moduleType;
+  const namespace = hint === 'aics' ? 'aics' : hint ? 'women-solo-parent' : null;
+  const url = `/api/cases/${namespace ? namespace + '/' : ''}${encodeURIComponent(String(idOrCaseNumber))}/step`;
+  const request: RequestInit = documents.length ? { ...intakeRequest(payload, documents), method: 'PATCH' } : {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
-  });
+  };
+  const res = await authFetch(url, request);
 
   if (!res.ok) {
     const errorJson = await res.json().catch(() => ({}));
@@ -261,7 +314,10 @@ export async function apiUpdateCaseStep(idOrCaseNumber: string | number, payload
 // 5. Create Women & Solo Parent Case (POST /api/cases/women-solo-parent)
 export async function apiCreateWomenSoloParentCase(data: {
   case_number?: string;
-  fullName: string;
+  firstName: string;
+  middleName?: string;
+  lastName: string;
+  extensionName?: string;
   birthDate?: string;
   gender?: string;
   civilStatus?: string;
@@ -275,7 +331,7 @@ export async function apiCreateWomenSoloParentCase(data: {
   financialAidAmount?: number;
   notes?: string;
 }, documents: IntakeDocument[] = []) {
-  const res = await fetch('/api/cases/women-solo-parent', intakeRequest(data, documents));
+  const res = await authFetch('/api/cases/women-solo-parent', intakeRequest(data, documents));
 
   if (!res.ok) {
     const errorJson = await res.json().catch(() => ({}));
@@ -290,8 +346,12 @@ export async function apiCreateWomenSoloParentCase(data: {
 // 6. Create AICS Case (POST /api/cases/aics)
 export async function apiCreateAicsCase(data: {
   case_number?: string;
-  fullName: string;
+  firstName: string;
+  middleName?: string;
+  lastName: string;
+  extensionName?: string;
   birthDate?: string;
+  gender?: string;
   civilStatus?: string;
   barangay: string;
   contactNumber?: string;
@@ -302,7 +362,7 @@ export async function apiCreateAicsCase(data: {
   requestedAmount?: number;
   status?: string;
 }, documents: IntakeDocument[] = []) {
-  const res = await fetch('/api/cases/aics', intakeRequest(data, documents));
+  const res = await authFetch('/api/cases/aics', intakeRequest(data, documents));
 
   if (!res.ok) {
     const errorJson = await res.json().catch(() => ({}));
@@ -341,7 +401,7 @@ export interface DashboardStats {
 
 // 7. Get Live Dashboard Statistics (GET /api/dashboard/stats)
 export async function apiGetDashboardStats(): Promise<DashboardStats> {
-  const res = await fetch('/api/dashboard/stats');
+  const res = await authFetch('/api/dashboard/stats');
   if (!res.ok) {
     throw new Error(`Failed to load dashboard statistics: ${res.statusText}`);
   }
@@ -353,16 +413,66 @@ export async function apiGetDashboardStats(): Promise<DashboardStats> {
 export function notifyDataUpdated() {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('benefitrack:data-updated'));
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const channel = new BroadcastChannel('benefitrack:case-updates');
+        channel.postMessage('updated');
+        channel.close();
+      } else {
+        localStorage.setItem('benefitrack:data-updated', `${Date.now()}:${Math.random()}`);
+      }
+    } catch {}
   }
 }
 
-export function subscribeDataUpdated(callback: () => void) {
+export function subscribeDataUpdated(callback: () => void | Promise<void>) {
   if (typeof window === 'undefined') return () => {};
-  const handler = () => callback();
-  window.addEventListener('benefitrack:data-updated', handler);
-  return () => {
-    window.removeEventListener('benefitrack:data-updated', handler);
+  let disposed = false;
+  let running = false;
+  let queued = false;
+  const run = async () => {
+    if (disposed) return;
+    if (running) { queued = true; return; }
+    running = true;
+    try { await callback(); }
+    catch (error) { console.warn('[BENEFITRACK] Could not refresh data:', error); }
+    finally {
+      running = false;
+      if (queued && !disposed) { queued = false; void run(); }
+    }
   };
+  const handler = () => { void run(); };
+  const visibleHandler = () => { if (document.visibilityState === 'visible') handler(); };
+  const storageHandler = (event: StorageEvent) => { if (event.key === 'benefitrack:data-updated') handler(); };
+  let channel: BroadcastChannel | undefined;
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      channel = new BroadcastChannel('benefitrack:case-updates');
+      channel.onmessage = handler;
+    }
+  } catch {}
+  const poll = window.setInterval(visibleHandler, 5000);
+  window.addEventListener('benefitrack:data-updated', handler);
+  window.addEventListener('focus', handler);
+  window.addEventListener('storage', storageHandler);
+  document.addEventListener('visibilitychange', visibleHandler);
+  return () => {
+    disposed = true;
+    window.removeEventListener('benefitrack:data-updated', handler);
+    window.removeEventListener('focus', handler);
+    window.removeEventListener('storage', storageHandler);
+    document.removeEventListener('visibilitychange', visibleHandler);
+    window.clearInterval(poll);
+    channel?.close();
+  };
+}
+
+export async function apiResubmitReturnedCase(id: string | number, names: SeparatedNameFields & { birthDate?: string; gender?: string; civilStatus?: string; contactNumber?: string }, module: 'women-solo-parent' | 'aics', version?: number, documents: IntakeDocument[] = []) {
+  return apiUpdateCaseStep(id, {
+    ...names, ...mapNameFields(names), status: 'BARANGAY_ENDORSED', expected_version: version,
+    moduleType: module === 'aics' ? 'aics' : 'solo-parent',
+    action_note: 'Barangay submitted applicant corrections for renewed MSWD review.',
+  }, documents);
 }
 
 // 9. Session-based submitted cases tracking for Secretary intake
@@ -415,3 +525,31 @@ export function isStaffRole(role?: string): boolean {
   );
 }
 
+
+export function getCorrectionNotes(record?: DbCaseRecord): string {
+  const value = record?.correction_notes ?? record?.workflow_data?.correctionNotes;
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  const logs = record?.monitoring_logs;
+  if (Array.isArray(logs)) {
+    const returned = [...logs].reverse().find((log: any) => log?.action === 'RETURNED_FOR_CORRECTION');
+    if (typeof (returned as any)?.note === 'string') return (returned as any).note;
+  }
+  return 'No correction instructions were recorded. Please contact MSWD before resubmitting.';
+}
+
+export async function apiReturnCaseForCorrection(id: string | number, notes: string, module: 'women-solo-parent' | 'aics', version?: number, sourceStatus?: string) {
+  if (!notes.trim()) throw new Error('Specific correction instructions are required.');
+  const moduleType = module === 'aics' ? 'aics' : 'solo-parent';
+  let expectedVersion = version;
+  if (sourceStatus === 'BARANGAY_ENDORSED') {
+    const acknowledged = await apiUpdateCaseStep(id, {
+      moduleType, status: 'UNDER_REVIEW', expected_version: expectedVersion,
+      action_note: 'MSWD acknowledged the endorsement for profile review.',
+    });
+    expectedVersion = acknowledged.workflow_version;
+  }
+  return apiUpdateCaseStep(id, {
+    moduleType, status: 'RETURNED_FOR_CORRECTION', expected_version: expectedVersion,
+    correctionNotes: notes.trim(), action_note: notes.trim(),
+  });
+}

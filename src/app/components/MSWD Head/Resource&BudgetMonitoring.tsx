@@ -67,76 +67,27 @@ export function ResourceBudgetMonitoring({ onNavigate }: FrontlineCrisisProps) {
 
   // Monthly enrollment trend data
   const enrollmentData = [
-    { month: "Jan", beneficiaries: 420 },
-    { month: "Feb", beneficiaries: 510 },
-    { month: "Mar", beneficiaries: 380 },
-    { month: "Apr", beneficiaries: 590 },
-    { month: "May", beneficiaries: 670 },
-    { month: "Jun", beneficiaries: 710 },
+    { month: "Jan", beneficiaries: 0 },
+    { month: "Feb", beneficiaries: 0 },
+    { month: "Mar", beneficiaries: 0 },
+    { month: "Apr", beneficiaries: 0 },
+    { month: "May", beneficiaries: 0 },
+    { month: "Jun", beneficiaries: 0 },
   ];
 
   // Sector distribution data
   const distributionData = [
-    { name: "Women & Solo Parent", value: 1, color: "#a855f7" },
-    { name: "Children & Youth", value: 1, color: "#3b82f6" },
-    { name: "PWD", value: 1, color: "#14b8a6" },
+    { name: "Women & Solo Parent", value: 0, color: "#a855f7" },
+    { name: "Children & Youth", value: 0, color: "#3b82f6" },
+    { name: "PWD", value: 0, color: "#14b8a6" },
     { name: "Elderly", value: 0, color: "#f59e0b" },
-    { name: "Feeding", value: 1, color: "#22c55e" },
-    { name: "Day Care", value: 1, color: "#ec4899" },
-    { name: "CICL", value: 1, color: "#f97316" },
+    { name: "Feeding", value: 0, color: "#22c55e" },
+    { name: "Day Care", value: 0, color: "#ec4899" },
+    { name: "CICL", value: 0, color: "#f97316" },
   ];
 
   // Sample records
-  const allRecords: BeneficiaryRecord[] = [
-    {
-      id: "REC-001",
-      date: "Dec 12, 2024",
-      beneficiary: { name: "Maria Santos", id: "8921", avatar: "MS" },
-      sector: "Solo Parent", sectorColor: "bg-purple-100 text-purple-700",
-      serviceType: "Financial Assistance", status: "Approved",
-      statusColor: "text-green-600", statusDot: "bg-green-600", amount: "₱5,000",
-    },
-    {
-      id: "REC-002",
-      date: "Dec 11, 2024",
-      beneficiary: { name: "Juan Dela Cruz", id: "8204", avatar: "JC" },
-      sector: "PWD", sectorColor: "bg-teal-100 text-teal-700",
-      serviceType: "Medical Support", status: "Pending",
-      statusColor: "text-amber-600", statusDot: "bg-amber-600", amount: "₱12,000",
-    },
-    {
-      id: "REC-003",
-      date: "Dec 10, 2024",
-      beneficiary: { name: "Lorna Reyes", id: "9932", avatar: "LR" },
-      sector: "Elderly", sectorColor: "bg-amber-100 text-amber-700",
-      serviceType: "Pension Update", status: "Approved",
-      statusColor: "text-green-600", statusDot: "bg-green-600", amount: "₱3,500",
-    },
-    {
-      id: "REC-004",
-      date: "Dec 9, 2024",
-      beneficiary: { name: "Baby Anna Cruz", id: "1120", avatar: "BC" },
-      sector: "Feeding", sectorColor: "bg-green-100 text-green-700",
-      serviceType: "Milk Supplement", status: "In Progress",
-      statusColor: "text-blue-600", statusDot: "bg-blue-600", amount: "₱2,500",
-    },
-    {
-      id: "REC-005",
-      date: "Dec 8, 2024",
-      beneficiary: { name: "Rosa Martinez", id: "7845", avatar: "RM" },
-      sector: "Solo Parent", sectorColor: "bg-purple-100 text-purple-700",
-      serviceType: "Educational Support", status: "Approved",
-      statusColor: "text-green-600", statusDot: "bg-green-600", amount: "₱8,000",
-    },
-    {
-      id: "REC-006",
-      date: "Dec 7, 2024",
-      beneficiary: { name: "Pedro Gonzales", id: "6523", avatar: "PG" },
-      sector: "Children & Youth", sectorColor: "bg-blue-100 text-blue-700",
-      serviceType: "Educational Scholarship", status: "Pending",
-      statusColor: "text-amber-600", statusDot: "bg-amber-600", amount: "₱15,000",
-    },
-  ];
+  const allRecords: BeneficiaryRecord[] = [];
 
   const handleViewRecord = (record: BeneficiaryRecord) => {
     toast.info(`Viewing record for ${record.beneficiary.name}`);
@@ -502,6 +453,9 @@ export function ResourceBudgetMonitoring({ onNavigate }: FrontlineCrisisProps) {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
+                        {filteredRecords.length === 0 && (
+                          <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-500 text-sm">No records found.</td></tr>
+                        )}
                         {filteredRecords.map((record) => (
                           <tr key={record.id} className="hover:bg-gray-50 transition-colors">
                             <td className="px-6 py-4 text-sm text-gray-600">{record.date}</td>

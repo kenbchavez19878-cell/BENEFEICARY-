@@ -13,23 +13,7 @@ interface AuditEntry {
   status: "Success" | "Failed" | "Pending";
 }
 
-const AUDIT_DATA: AuditEntry[] = [
-  { id: "AL-001", user: "Juan Dela Cruz", role: "Staff", action: "Updated CICL application #BC-2204", module: "Sectoral Services", dateTime: "Oct 24, 2024 · 10:32 AM", status: "Success" },
-  { id: "AL-002", user: "Carlos Villanueva", role: "Staff", action: "Created TUPAD beneficiary record for M. Ramos", module: "Employment Programs", dateTime: "Oct 24, 2024 · 10:15 AM", status: "Success" },
-  { id: "AL-003", user: "MSWD Head Officer", role: "Head Account", action: "Viewed audit logs", module: "Reports & Administration", dateTime: "Oct 24, 2024 · 09:58 AM", status: "Success" },
-  { id: "AL-004", user: "System Administrator", role: "Administrator", action: "Created new user account for P. Garcia", module: "User Management", dateTime: "Oct 24, 2024 · 09:40 AM", status: "Success" },
-  { id: "AL-005", user: "Rosa Mendoza", role: "Staff", action: "Approved medical assistance request #MA-0981", module: "Emergency & Crisis", dateTime: "Oct 24, 2024 · 09:20 AM", status: "Success" },
-  { id: "AL-006", user: "Elena Bautista", role: "Staff", action: "Submitted DOLE assistance report Q3-2024", module: "Employment Programs", dateTime: "Oct 23, 2024 · 04:55 PM", status: "Success" },
-  { id: "AL-007", user: "Miguel Torres", role: "Staff", action: "Registered OFW profile for A. Cruz (Saudi Arabia)", module: "OFW Services", dateTime: "Oct 23, 2024 · 04:30 PM", status: "Success" },
-  { id: "AL-008", user: "MSWD Head Officer", role: "Head Account", action: "Changed staff module assignment for Staff 3", module: "User Management", dateTime: "Oct 23, 2024 · 03:15 PM", status: "Success" },
-  { id: "AL-009", user: "Ana Reyes", role: "Staff", action: "Submitted supplementary feeding attendance — Oct batch", module: "Sectoral Services", dateTime: "Oct 23, 2024 · 02:40 PM", status: "Success" },
-  { id: "AL-010", user: "Pedro Garcia", role: "Staff", action: "Updated PWD registration #PWD-4421", module: "Sectoral Services", dateTime: "Oct 23, 2024 · 02:10 PM", status: "Success" },
-  { id: "AL-011", user: "System Administrator", role: "Administrator", action: "Generated monthly beneficiary report — October 2024", module: "Reports & Administration", dateTime: "Oct 23, 2024 · 01:30 PM", status: "Success" },
-  { id: "AL-012", user: "Maria Santos", role: "Staff", action: "Added family profile — Santos household (Brgy. Salvacion)", module: "Beneficiary Profiling", dateTime: "Oct 23, 2024 · 11:45 AM", status: "Success" },
-  { id: "AL-013", user: "Juan Dela Cruz", role: "Staff", action: "Failed login attempt", module: "Authentication", dateTime: "Oct 22, 2024 · 08:05 AM", status: "Failed" },
-  { id: "AL-014", user: "Rosa Mendoza", role: "Staff", action: "Submitted disaster relief request — pending supervisor review", module: "Emergency & Crisis", dateTime: "Oct 22, 2024 · 09:50 AM", status: "Pending" },
-  { id: "AL-015", user: "Program Supervisor", role: "Supervisor", action: "Approved quarterly program performance report", module: "Reports & Administration", dateTime: "Oct 21, 2024 · 03:00 PM", status: "Success" },
-];
+const AUDIT_DATA: AuditEntry[] = [];
 
 const STATUS_CONFIG = {
   Success: { color: "bg-green-50 text-green-700 border-green-200", icon: <CheckCircle className="size-3" /> },

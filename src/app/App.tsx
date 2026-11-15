@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { toast } from "sonner";
+import { logoutAccount } from "./services/authService";
+import { lazy, Suspense, useState } from "react";
 import { LoginForm } from "./components/Website/LoginFormEnhanced";
-import { DashboardLayout as MSWDDashboardLayout } from "./components/MSWD Staff/MSWDStaffDashboardLayout";
-import { DashboardLayout as BarangaySecretaryDashboardLayout } from "./components/Barangay Secretary/BarangaySecretaryDashboardLayout";
-import { DashboardLayout as BarangayRegistrarDashboardLayout } from "./components/Barangay Secretary/BarangaySecretaryDashboardLayout";
-import { DashboardLayout as MSWDHeadDashboardLayout } from "./components/MSWD Head/MSWDHeadDashboardLayout";
-import { AdministratorDashboardLayout } from "./components/Administrator/AdministratorDashboardLayout";
-import { BeneficiaryDashboard } from "./components/Website/BeneficiaryDashboard";
+const MSWDDashboardLayout = lazy(() => import("./components/MSWD Staff/MSWDStaffDashboardLayout").then(module => ({ default: module.DashboardLayout })));
+const BarangayRegistrarDashboardLayout = lazy(() => import("./components/Barangay Secretary/BarangaySecretaryDashboardLayout").then(module => ({ default: module.DashboardLayout })));
+const MSWDHeadDashboardLayout = lazy(() => import("./components/MSWD Head/MSWDHeadDashboardLayout").then(module => ({ default: module.DashboardLayout })));
+const AdministratorDashboardLayout = lazy(() => import("./components/Administrator/AdministratorDashboardLayout").then(module => ({ default: module.AdministratorDashboardLayout })));
+const BeneficiaryDashboard = lazy(() => import("./components/Website/BeneficiaryDashboard").then(module => ({ default: module.BeneficiaryDashboard })));
 import { PublicWebsite } from "./components/Website/PublicWebsite";
-import { RegistrationPage } from "./components/Website/RegistrationPage";
+const RegistrationPage = lazy(() => import("./components/Website/RegistrationPage").then(module => ({ default: module.RegistrationPage })));
 import { Toaster } from "./components/ui/sonner";
 
 type AppView =
@@ -57,7 +58,9 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try { await logoutAccount(); }
+    catch { toast.error("Logout failed. Please try again."); return; }
     setView("website");
     setUserRole("");
     setAccountId(undefined);
@@ -68,7 +71,7 @@ export default function App() {
   };
 
   return (
-    <>
+    <Suspense fallback={null}>
       {view === "website" && (
         <PublicWebsite
           onNavigateToLogin={() => setView("login")}
@@ -93,6 +96,7 @@ export default function App() {
 
       {view === "beneficiary-dashboard" && (
         <BeneficiaryDashboard
+          accountId={accountId}
           userRole={userRole}
           onLogout={handleLogout}
           onNavigateToRegister={() => setView("register")}
@@ -142,6 +146,6 @@ export default function App() {
       )}
 
       <Toaster />
-    </>
+    </Suspense>
   );
 }

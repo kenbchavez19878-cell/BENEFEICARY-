@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 from decimal import Decimal
 from django.db import models
+from django.conf import settings
 from django.utils import timezone
 
 
@@ -64,6 +65,8 @@ class ReleaseMethod(models.TextChoices):
     CASH = 'CASH', 'Cash'
     CHECK = 'CHECK', 'Check'
     GUARANTEE_LETTER = 'GUARANTEE_LETTER', 'Guarantee Letter'
+    DIRECT_SERVICE = 'DIRECT_SERVICE', 'Direct Service'
+    REFERRAL = 'REFERRAL', 'Referral'
 
 
 class WomenCategory(models.TextChoices):
@@ -92,7 +95,9 @@ class Beneficiary(models.Model):
     """
     tracking_id = models.CharField(max_length=60, unique=True, db_index=True, blank=True, null=True)
     first_name = models.CharField(max_length=120, default='Resident', blank=True, null=True)
+    middle_name = models.CharField(max_length=120, blank=True, default='')
     last_name = models.CharField(max_length=120, default='Client', blank=True, null=True)
+    extension_name = models.CharField(max_length=30, blank=True, default='')
     contact_number = models.CharField(max_length=50, blank=True, null=True, default='')
     barangay_name = models.CharField(max_length=100, db_index=True, blank=True, null=True, default='Poblacion')
     civil_status = models.CharField(max_length=50, blank=True, null=True, default='SINGLE')
@@ -142,14 +147,38 @@ class Beneficiary(models.Model):
         return f"{self.first_name} {self.last_name} ({self.barangay_name})"
 
 
-class WomenAndSoloParentCase(models.Model):
+class ApplicationAccount(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='application_account')
+    external_id = models.CharField(max_length=80, unique=True)
+    role = models.CharField(max_length=40, choices=[(value, value) for value in ('Administrator', 'HeadAccount', 'Staff', 'BarangaySecretary', 'BarangayRegistrar', 'Beneficiary')])
+    barangay = models.CharField(max_length=100, blank=True)
+    beneficiary_tracking_id = models.CharField(max_length=80, blank=True)
+
+
+class CaseIntakeFields(models.Model):
+    # Legacy records retain their original display name; never guess name parts.
+    first_name = models.CharField(max_length=120, blank=True, default='')
+    middle_name = models.CharField(max_length=120, blank=True, default='')
+    last_name = models.CharField(max_length=120, blank=True, default='')
+    extension_name = models.CharField(max_length=30, blank=True, default='')
+    intake_notes = models.TextField(blank=True, default='')
+    workflow_version = models.PositiveIntegerField(default=0)
+    payout_officer_name = models.CharField(max_length=150, blank=True, default='')
+    payout_officer_user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name='%(app_label)s_%(class)s_releases')
+    workflow_data = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        abstract = True
+
+
+class WomenAndSoloParentCase(CaseIntakeFields):
     """
     Case workflow for Women and Solo Parent assistance programs in Calabanga MSWD.
     Auto-generates missing case_number, tracking_id, spic_number, and booklet_number.
     """
     case_number = models.CharField(max_length=60, unique=True, db_index=True, blank=True, null=True)
     tracking_id = models.CharField(max_length=60, unique=True, db_index=True, blank=True, null=True)
-    beneficiary_name = models.CharField(max_length=255, db_index=True, blank=True, null=True, default='Beneficiary Client')
+    beneficiary_name = models.CharField(max_length=400, db_index=True, blank=True, null=True, default='Beneficiary Client')
     barangay_name = models.CharField(max_length=100, db_index=True, blank=True, null=True, default='Poblacion')
     category = models.CharField(
         max_length=50,
@@ -172,7 +201,7 @@ class WomenAndSoloParentCase(models.Model):
         choices=EligibilityStatus.choices,
         blank=True,
         null=True,
-        default=EligibilityStatus.ELIGIBLE
+        default=None
     )
     documents_status = models.JSONField(default=dict, blank=True, null=True)
     assessment_notes = models.TextField(blank=True, null=True, default='')
@@ -284,16 +313,17 @@ class WomenAndSoloParentCase(models.Model):
         return f"[{self.case_number}] {self.beneficiary_name} - {self.get_category_display()} ({self.get_status_display()})"
 
 
-class AicsCase(models.Model):
+class AicsCase(CaseIntakeFields):
     """
     Case workflow for Assistance to Individuals in Crisis Situations (AICS).
     Auto-generates missing case_number, tracking_id, and guarantee_letter_number.
     """
     case_number = models.CharField(max_length=60, unique=True, db_index=True, blank=True, null=True)
     tracking_id = models.CharField(max_length=60, unique=True, db_index=True, blank=True, null=True)
-    beneficiary_name = models.CharField(max_length=255, db_index=True, blank=True, null=True, default='Beneficiary Client')
+    beneficiary_name = models.CharField(max_length=400, db_index=True, blank=True, null=True, default='Beneficiary Client')
     barangay_name = models.CharField(max_length=100, db_index=True, blank=True, null=True, default='Poblacion')
     contact_number = models.CharField(max_length=50, blank=True, null=True, default='')
+    gender = models.CharField(max_length=20, blank=True, default='')
     civil_status = models.CharField(max_length=50, blank=True, null=True, default='Resident Client')
     birth_date = models.DateField(null=True, blank=True)
     income_status = models.CharField(max_length=50, blank=True, null=True, default='Indigent / Crisis')
@@ -320,7 +350,7 @@ class AicsCase(models.Model):
         choices=EligibilityStatus.choices,
         blank=True,
         null=True,
-        default=EligibilityStatus.ELIGIBLE
+        default=None
     )
     documents_status = models.JSONField(default=dict, blank=True, null=True)
     assessment_notes = models.TextField(blank=True, null=True, default='')

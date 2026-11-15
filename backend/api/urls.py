@@ -1,4 +1,5 @@
 from django.urls import re_path
+from .auth_views import SessionView, LoginView, LogoutView
 from .views import (
     BeneficiaryViewSet,
     WomenAndSoloParentCaseViewSet,
@@ -11,6 +12,9 @@ from .views import (
 )
 
 urlpatterns = [
+    re_path(r'^auth/session/?$', SessionView.as_view()),
+    re_path(r'^auth/login/?$', LoginView.as_view()),
+    re_path(r'^auth/logout/?$', LogoutView.as_view()),
     re_path(r'^documents/(?P<pk>[0-9]+)/file/?$', CaseDocumentFileView.as_view(), name='case-document-file'),
     # System health check
     re_path(r'^health/?$', HealthCheckView.as_view(), name='api-health'),

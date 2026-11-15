@@ -1,13 +1,24 @@
 from datetime import datetime, timezone
 from decimal import Decimal
-from django.db.models import Q
+import re
+import json
+import secrets
+from collections.abc import Mapping
+from django.db.models import Q, Prefetch
+from django.db.models.functions import Trim
+from django.db import transaction, connection, close_old_connections, DatabaseError
 from django.http import Http404, FileResponse
 from django.shortcuts import get_object_or_404
 from .models import CaseDocument
+from .documents import DocumentStorageUnavailable
+from .workflow_rules import ensure_case_open
+from rest_framework.exceptions import ValidationError
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
+from .permissions import CaseAccess, DashboardAccess, scope_cases
 
 from .models import (
     Beneficiary,
@@ -25,6 +36,7 @@ from .serializers import (
 
 
 class BeneficiaryViewSet(viewsets.ModelViewSet):
+    permission_classes = [CaseAccess]
     """
     ModelViewSet providing full CRUD operations for Beneficiary records.
     Supports lookup by ID or tracking_id.
@@ -51,7 +63,7 @@ class BeneficiaryViewSet(viewsets.ModelViewSet):
         return obj
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = scope_cases(super().get_queryset(), self.request.user)
         barangay = self.request.query_params.get('barangay')
         is_active = self.request.query_params.get('is_active')
 
@@ -82,12 +94,60 @@ class BeneficiaryViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_201_CREATED)
 
 
-class WomenAndSoloParentCaseViewSet(viewsets.ModelViewSet):
+def case_update_data(request, instance):
+    ensure_case_open(instance)
+    if not isinstance(request.data, Mapping):
+        raise ValidationError({'payload': 'Expected a JSON object.'})
+    data = request.data
+    if 'payload' in data:
+        try:
+            payload = json.loads(data['payload'])
+        except (ValueError, TypeError):
+            raise ValidationError({'payload': 'Invalid JSON payload.'})
+        if not isinstance(payload, dict):
+            raise ValidationError({'payload': 'Expected an object.'})
+        payload['uploaded_files'] = data.getlist('uploaded_files') if hasattr(data, 'getlist') else data.get('uploaded_files', [])
+        return payload
+    result = dict(data.items())
+    if 'uploaded_files' in data and hasattr(data, 'getlist'):
+        result['uploaded_files'] = data.getlist('uploaded_files')
+    return result
+
+
+def filter_secretary_queue(queryset, request):
+    if request.query_params.get('queue') != 'secretary':
+        return queryset
+    barangay = re.sub(r'^(brgy\.?|barangay)\s+', '', request.query_params.get('barangay', '').strip(), flags=re.I).strip()
+    if not barangay:
+        raise ValidationError({'barangay': 'An assigned barangay is required for the secretary queue.'})
+    return queryset.annotate(_queue_barangay=Trim('barangay_name')).filter(status__in=(
+        CaseStatus.BARANGAY_ENDORSED, CaseStatus.UNDER_REVIEW, CaseStatus.RETURNED_FOR_CORRECTION,
+    )).filter(
+        Q(_queue_barangay__iexact=barangay) | Q(_queue_barangay__iexact=f'Brgy. {barangay}')
+        | Q(_queue_barangay__iexact=f'Brgy {barangay}') | Q(_queue_barangay__iexact=f'Barangay {barangay}')
+    )
+
+
+class LockedCaseWrites:
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        ensure_case_open(instance)
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class WomenAndSoloParentCaseViewSet(LockedCaseWrites, viewsets.ModelViewSet):
+    permission_classes = [CaseAccess]
     """
     Full CRUD ModelViewSet for Women & Solo Parent cases.
     Dual-supports ID, case_number, and tracking_id lookups.
     """
-    queryset = WomenAndSoloParentCase.objects.all()
+    queryset = WomenAndSoloParentCase.objects.prefetch_related(Prefetch("attachments", queryset=CaseDocument.objects.order_by("pk")))
     serializer_class = WomenAndSoloParentCaseSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['case_number', 'tracking_id', 'beneficiary_name', 'barangay_name', 'spic_number', 'booklet_number']
@@ -97,6 +157,8 @@ class WomenAndSoloParentCaseViewSet(viewsets.ModelViewSet):
     def get_object(self):
         lookup_val = self.kwargs[self.lookup_url_kwarg or self.lookup_field]
         queryset = self.filter_queryset(self.get_queryset())
+        if connection.in_atomic_block and self.request.method in ('PATCH', 'PUT', 'POST', 'DELETE'):
+            queryset = queryset.select_for_update()
         if str(lookup_val).isdigit():
             obj = queryset.filter(Q(pk=lookup_val) | Q(case_number=lookup_val) | Q(tracking_id=lookup_val)).first()
         else:
@@ -109,17 +171,17 @@ class WomenAndSoloParentCaseViewSet(viewsets.ModelViewSet):
         return obj
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = filter_secretary_queue(scope_cases(super().get_queryset(), self.request.user), self.request)
         status_param = self.request.query_params.get('status')
         category_param = self.request.query_params.get('category')
         barangay_param = self.request.query_params.get('barangay')
         search_param = self.request.query_params.get('search')
 
         if status_param and status_param.upper() != 'ALL':
-            queryset = queryset.filter(status=status_param.upper())
+            queryset = queryset.filter(status=re.sub(r'\s+', '_', status_param.strip().upper()))
         if category_param and category_param.upper() != 'ALL':
             queryset = queryset.filter(category=category_param.upper())
-        if barangay_param and barangay_param.upper() != 'ALL':
+        if barangay_param and barangay_param.upper() != 'ALL' and self.request.query_params.get('queue') != 'secretary':
             queryset = queryset.filter(barangay_name__icontains=barangay_param)
         if search_param and search_param.strip():
             s = search_param.strip()
@@ -164,11 +226,15 @@ class WomenAndSoloParentCaseViewSet(viewsets.ModelViewSet):
         })
 
     @action(detail=True, methods=['patch', 'post'], url_path='step')
+    @transaction.atomic
     def update_step(self, request, pk=None):
         instance = self.get_object()
-        data = request.data.copy()
+        self.check_object_permissions(request, instance)
+        data = case_update_data(request, instance)
 
         action_note = data.pop('action_note', None) or data.get('assessment_notes')
+        if data.get('status') == 'RETURNED_FOR_CORRECTION':
+            action_note = data.get('correctionNotes', action_note)
         current_logs = list(instance.monitoring_logs or [])
         if action_note or 'status' in data:
             current_logs.append({
@@ -191,12 +257,13 @@ class WomenAndSoloParentCaseViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_200_OK)
 
 
-class AicsCaseViewSet(viewsets.ModelViewSet):
+class AicsCaseViewSet(LockedCaseWrites, viewsets.ModelViewSet):
+    permission_classes = [CaseAccess]
     """
     Full CRUD ModelViewSet for AICS Crisis cases.
     Dual-supports ID, case_number, and tracking_id lookups.
     """
-    queryset = AicsCase.objects.all()
+    queryset = AicsCase.objects.prefetch_related(Prefetch("attachments", queryset=CaseDocument.objects.order_by("pk")))
     serializer_class = AicsCaseSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['case_number', 'tracking_id', 'beneficiary_name', 'barangay_name', 'guarantee_letter_number', 'service_provider']
@@ -206,6 +273,8 @@ class AicsCaseViewSet(viewsets.ModelViewSet):
     def get_object(self):
         lookup_val = self.kwargs[self.lookup_url_kwarg or self.lookup_field]
         queryset = self.filter_queryset(self.get_queryset())
+        if connection.in_atomic_block and self.request.method in ('PATCH', 'PUT', 'POST', 'DELETE'):
+            queryset = queryset.select_for_update()
         if str(lookup_val).isdigit():
             obj = queryset.filter(Q(pk=lookup_val) | Q(case_number=lookup_val) | Q(tracking_id=lookup_val)).first()
         else:
@@ -218,7 +287,7 @@ class AicsCaseViewSet(viewsets.ModelViewSet):
         return obj
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = filter_secretary_queue(scope_cases(super().get_queryset(), self.request.user), self.request)
         status_param = self.request.query_params.get('status')
         type_param = (
             self.request.query_params.get('aics_type')
@@ -229,10 +298,10 @@ class AicsCaseViewSet(viewsets.ModelViewSet):
         search_param = self.request.query_params.get('search')
 
         if status_param and status_param.upper() != 'ALL':
-            queryset = queryset.filter(status=status_param.upper())
+            queryset = queryset.filter(status=re.sub(r'\s+', '_', status_param.strip().upper()))
         if type_param and type_param.upper() != 'ALL':
             queryset = queryset.filter(aics_type=type_param.upper())
-        if barangay_param and barangay_param.upper() != 'ALL':
+        if barangay_param and barangay_param.upper() != 'ALL' and self.request.query_params.get('queue') != 'secretary':
             queryset = queryset.filter(barangay_name__icontains=barangay_param)
         if search_param and search_param.strip():
             s = search_param.strip()
@@ -277,11 +346,15 @@ class AicsCaseViewSet(viewsets.ModelViewSet):
         })
 
     @action(detail=True, methods=['patch', 'post'], url_path='step')
+    @transaction.atomic
     def update_step(self, request, pk=None):
         instance = self.get_object()
-        data = request.data.copy()
+        self.check_object_permissions(request, instance)
+        data = case_update_data(request, instance)
 
         action_note = data.pop('action_note', None) or data.get('assessment_notes')
+        if data.get('status') == 'RETURNED_FOR_CORRECTION':
+            action_note = data.get('correctionNotes', action_note)
         current_logs = list(instance.monitoring_logs or [])
         if action_note or 'status' in data:
             current_logs.append({
@@ -305,45 +378,48 @@ class AicsCaseViewSet(viewsets.ModelViewSet):
 
 
 class UniversalCaseDetailView(APIView):
+    permission_classes = [CaseAccess]
     """
     Direct endpoint for frontend:
     GET /api/cases/<id_or_case_number>
     PATCH /api/cases/<id_or_case_number>
     """
-    def find_case(self, lookup_val, module_hint=None):
-        is_num = str(lookup_val).isdigit()
-
-        # Check Women & Solo Parent first if requested or not specified
-        if module_hint in ('women-solo-parent', 'solo-parent', 'women-vawc') or not module_hint:
-            q = Q(pk=lookup_val) if is_num else Q(case_number=lookup_val) | Q(tracking_id=lookup_val)
-            wsp = WomenAndSoloParentCase.objects.filter(q).first()
-            if wsp:
-                return wsp, 'women-solo-parent', WomenAndSoloParentCaseSerializer
-
-        # Check AICS
-        if module_hint == 'aics' or not module_hint:
-            q = Q(pk=lookup_val) if is_num else Q(case_number=lookup_val) | Q(tracking_id=lookup_val)
-            aics = AicsCase.objects.filter(q).first()
-            if aics:
-                return aics, 'aics', AicsCaseSerializer
-
-        # Last attempt on remaining module
-        q = Q(pk=lookup_val) if is_num else Q(case_number=lookup_val) | Q(tracking_id=lookup_val)
-        wsp = WomenAndSoloParentCase.objects.filter(q).first()
-        if wsp:
-            return wsp, 'women-solo-parent', WomenAndSoloParentCaseSerializer
-
-        return None, None, None
+    def find_case(self, lookup_val, module_hint=None, lock=False, user=None):
+        aliases = {'solo-parent': 'women-solo-parent', 'women-vawc': 'women-solo-parent'}
+        module_hint = aliases.get(module_hint, module_hint)
+        if module_hint not in (None, 'aics', 'women-solo-parent'):
+            return None, None, None
+        candidates = []
+        for model, module, serializer in (
+            (WomenAndSoloParentCase, 'women-solo-parent', WomenAndSoloParentCaseSerializer),
+            (AicsCase, 'aics', AicsCaseSerializer),
+        ):
+            if module_hint and module != module_hint:
+                continue
+            queryset = scope_cases(model.objects.all(), user).prefetch_related(Prefetch("attachments", queryset=CaseDocument.objects.order_by("pk")))
+            if lock:
+                queryset = queryset.select_for_update()
+            query = Q(case_number=lookup_val) | Q(tracking_id=lookup_val)
+            if str(lookup_val).isdigit():
+                query |= Q(pk=lookup_val)
+            instance = queryset.filter(query).first()
+            if instance:
+                candidates.append((instance, module, serializer))
+        if len(candidates) > 1:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({'module': 'An explicit module is required for this identifier.'})
+        return candidates[0] if candidates else (None, None, None)
 
     def get(self, request, lookup_value, format=None):
         module_hint = request.query_params.get('module')
-        instance, mod_name, ser_class = self.find_case(lookup_value, module_hint)
+        instance, mod_name, ser_class = self.find_case(lookup_value, module_hint, user=request.user)
         if not instance:
             return Response({
                 'success': False,
                 'error': f"Case '{lookup_value}' not found."
             }, status=status.HTTP_404_NOT_FOUND)
 
+        self.check_object_permissions(request, instance)
         serializer = ser_class(instance)
         return Response({
             'success': True,
@@ -354,21 +430,28 @@ class UniversalCaseDetailView(APIView):
 
 
 class UniversalCaseStepView(APIView):
+    permission_classes = [CaseAccess]
     """
     Direct endpoint for frontend:
     PATCH /api/cases/<id_or_case_number>/step
     """
+    @transaction.atomic
     def patch(self, request, lookup_value, format=None):
+        if not isinstance(request.data, Mapping):
+            raise ValidationError({'payload': 'Expected a JSON object.'})
         view = UniversalCaseDetailView()
-        instance, mod_name, ser_class = view.find_case(lookup_value, request.query_params.get('module'))
+        instance, mod_name, ser_class = view.find_case(lookup_value, request.query_params.get('module') or request.data.get('moduleType'), lock=True, user=request.user)
         if not instance:
             return Response({
                 'success': False,
                 'error': f"Case '{lookup_value}' not found for step update."
             }, status=status.HTTP_404_NOT_FOUND)
 
-        data = request.data.copy()
+        self.check_object_permissions(request, instance)
+        data = case_update_data(request, instance)
         action_note = data.pop('action_note', None) or data.get('assessment_notes')
+        if data.get('status') == 'RETURNED_FOR_CORRECTION':
+            action_note = data.get('correctionNotes', action_note)
         current_logs = list(instance.monitoring_logs or [])
         if action_note or 'status' in data:
             current_logs.append({
@@ -380,7 +463,7 @@ class UniversalCaseStepView(APIView):
             })
             data['monitoring_logs'] = current_logs
 
-        serializer = ser_class(instance, data=data, partial=True)
+        serializer = ser_class(instance, data=data, partial=True, context={'request': request})
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
@@ -392,13 +475,14 @@ class UniversalCaseStepView(APIView):
 
 
 class DashboardStatsView(APIView):
+    permission_classes = [DashboardAccess]
     """
     Live aggregated MSWD dashboard statistics:
     GET /api/dashboard/stats/
     """
     def get(self, request, format=None):
-        women_cases = list(WomenAndSoloParentCase.objects.all())
-        aics_cases = list(AicsCase.objects.all())
+        women_cases = list(scope_cases(WomenAndSoloParentCase.objects.all(), request.user))
+        aics_cases = list(scope_cases(AicsCase.objects.all(), request.user))
         all_cases = women_cases + aics_cases
 
         total_beneficiaries = len(all_cases)
@@ -407,6 +491,7 @@ class DashboardStatsView(APIView):
             CaseStatus.BARANGAY_ENDORSED,
             CaseStatus.UNDER_REVIEW,
             CaseStatus.IN_ASSESSMENT,
+            CaseStatus.RETURNED_FOR_CORRECTION,
         ]
         active_cases = sum(1 for c in all_cases if c.status in active_statuses)
 
@@ -458,20 +543,21 @@ class DashboardStatsView(APIView):
             logs = c.monitoring_logs if isinstance(c.monitoring_logs, list) else []
             for log in logs:
                 if isinstance(log, dict):
+                    timestamp = log.get('timestamp') if isinstance(log.get('timestamp'), str) else ''
                     recent_activities.append({
                         'id': log.get('id') or f"act-{secrets.randbelow(100000)}",
                         'clientName': c.beneficiary_name,
                         'clientId': c.case_number or c.tracking_id,
                         'program': prog_name,
                         'barangay': c.barangay_name,
-                        'date': log.get('timestamp', '')[:10] if log.get('timestamp') else 'Recent',
+                        'date': timestamp[:10] if timestamp else 'Recent',
                         'time': '',
                         'title': log.get('action') or 'Case Activity',
                         'description': log.get('note') or '',
                         'status': c.status,
                         'statusLabel': c.get_status_display() if hasattr(c, 'get_status_display') else c.status,
                         'author': log.get('performed_by') or 'MSWD Officer',
-                        'timestamp': log.get('timestamp') or (c.created_at.isoformat() if c.created_at else ''),
+                        'timestamp': timestamp or (c.created_at.isoformat() if c.created_at else ''),
                     })
 
         recent_activities.sort(key=lambda a: a.get('timestamp') or '', reverse=True)
@@ -505,18 +591,38 @@ class DashboardStatsView(APIView):
 
 
 class HealthCheckView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     """
     Health check endpoint:
     GET /api/health/
     """
     def get(self, request, format=None):
-        return Response({
-            'status': 'ok',
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        }, status=status.HTTP_200_OK)
+        try:
+            if not connection.in_atomic_block:
+                close_old_connections()
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT 1')
+                if cursor.fetchone() != (1,):
+                    raise DatabaseError('Database health query failed.')
+        except DatabaseError:
+            if not connection.in_atomic_block:
+                connection.close()
+            response = Response({
+                'status': 'unavailable', 'database': 'disconnected',
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        else:
+            response = Response({
+                'status': 'ok', 'database': 'connected',
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+            }, status=status.HTTP_200_OK)
+        response['Cache-Control'] = 'no-store'
+        return response
 
 
 class CaseDocumentFileView(APIView):
+    permission_classes = [CaseAccess]
     def get(self, request, pk):
         document = get_object_or_404(CaseDocument, pk=pk)
         case = document.aics_case or document.women_case
@@ -525,6 +631,8 @@ class CaseDocumentFileView(APIView):
             stream = document.file.open('rb')
         except FileNotFoundError:
             raise Http404('Document file is unavailable.')
+        except OSError:
+            raise DocumentStorageUnavailable() from None
         response = FileResponse(stream, content_type=document.content_type, filename=document.original_name)
         response['X-Content-Type-Options'] = 'nosniff'
         response['Cache-Control'] = 'private, no-store'

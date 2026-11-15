@@ -1,0 +1,52 @@
+[
+  {
+    "external_id": "brgy-001",
+    "username": "maria.lourdes",
+    "name": "Maria Lourdes Villanueva",
+    "role": "BarangaySecretary",
+    "barangay": "Brgy. San Juan",
+    "tracking_id": "",
+    "active": true,
+    "password": "Barangay@2026"
+  },
+  {
+    "external_id": "staff-001",
+    "username": "juan.ramos",
+    "name": "Juan Miguel Ramos",
+    "role": "Staff",
+    "barangay": "",
+    "tracking_id": "",
+    "active": true,
+    "password": "MSWDStaff@2026"
+  },
+  {
+    "external_id": "head-001",
+    "username": "maria.villanueva",
+    "name": "Maria Elena Villanueva",
+    "role": "HeadAccount",
+    "barangay": "",
+    "tracking_id": "",
+    "active": true,
+    "password": "MSWDHead@2026"
+  },
+  {
+    "external_id": "admin-001",
+    "username": "rafael.mendoza",
+    "name": "Rafael Antonio Mendoza",
+    "role": "Administrator",
+    "barangay": "",
+    "tracking_id": "",
+    "active": true,
+    "password": "Admin@2026"
+  },
+  {
+    "external_id": "ben-001",
+    "username": "maria.reyes",
+    "name": "Maria Cristina Santos Reyes",
+    "role": "Beneficiary",
+    "barangay": "Brgy. San Juan",
+    "tracking_id": "BEN-2026-000125",
+    "active": true,
+    "password": "Beneficiary@2026"
+  }
+]

@@ -63,36 +63,7 @@ interface ServiceApplication {
   amount?: string;
 }
 
-const MOCK_TRANSACTIONS: ServiceApplication[] = [
-  {
-    id: "app-101",
-    appNo: "APP-2026-0891",
-    serviceName: "AICS — Medical Assistance",
-    category: "Emergency & Crisis",
-    dateSubmitted: "2026-09-28",
-    status: "Approved",
-    amount: "₱5,000.00",
-    notes: "Approved by MSWD Head. Ready for payout pick-up at Municipal Treasury.",
-  },
-  {
-    id: "app-102",
-    appNo: "APP-2026-0742",
-    serviceName: "Solo Parent Identification & Benefit Card",
-    category: "Sectoral Services",
-    dateSubmitted: "2026-09-15",
-    status: "Under Review",
-    notes: "Documents undergoing verification by Barangay Secretary.",
-  },
-  {
-    id: "app-103",
-    appNo: "APP-2026-0510",
-    serviceName: "Disaster Emergency Relief Pack",
-    category: "Emergency & Crisis",
-    dateSubmitted: "2026-08-10",
-    status: "Completed",
-    notes: "Relief goods claim claimed at Brgy. San Juan Multi-Purpose Hall.",
-  },
-];
+const INITIAL_TRANSACTIONS: ServiceApplication[] = [];
 
 interface UserDocument {
   id: string;
@@ -103,32 +74,7 @@ interface UserDocument {
   size: string;
 }
 
-const INITIAL_DOCUMENTS: UserDocument[] = [
-  {
-    id: "doc-1",
-    name: "Barangay_Certificate_Residency.pdf",
-    type: "Barangay Certificate of Residency",
-    uploadDate: "2026-09-01",
-    status: "Verified",
-    size: "1.2 MB",
-  },
-  {
-    id: "doc-2",
-    name: "Valid_Government_ID_PhilSys.pdf",
-    type: "Government Issued ID",
-    uploadDate: "2026-09-01",
-    status: "Verified",
-    size: "2.4 MB",
-  },
-  {
-    id: "doc-3",
-    name: "Certificate_of_Indigency.pdf",
-    type: "Certificate of Indigency",
-    uploadDate: "2026-09-15",
-    status: "Verified",
-    size: "890 KB",
-  },
-];
+const INITIAL_DOCUMENTS: UserDocument[] = [];
 
 export function BeneficiaryDashboard({
   userRole = "Beneficiary",
@@ -143,7 +89,7 @@ export function BeneficiaryDashboard({
 
   const [activeTab, setActiveTab] = useState<TabType>("dashboard");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
-  const [transactions, setTransactions] = useState<ServiceApplication[]>(MOCK_TRANSACTIONS);
+  const [transactions, setTransactions] = useState<ServiceApplication[]>(INITIAL_TRANSACTIONS);
   const [documents, setDocuments] = useState<UserDocument[]>(INITIAL_DOCUMENTS);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);

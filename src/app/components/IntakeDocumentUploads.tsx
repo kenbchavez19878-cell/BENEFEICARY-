@@ -1,6 +1,7 @@
 import React, { useRef } from "react";
 import { toast } from "sonner";
 import type { IntakeDocument } from "../services/caseService";
+import { getIntakeFileError } from "../utils/intakeFileValidation";
 
 export interface IntakeRequirement {
   id: string;
@@ -40,22 +41,20 @@ export function aicsRequirements(type: string): IntakeRequirement[] {
   return [...common, { id: "a-8", name: "Proof of Income/Crisis" }];
 }
 
-export function IntakeDocumentUploads({ requirements, documents, onChange, disabled }: {
+export function IntakeDocumentUploads({ requirements, documents, onChange, disabled, existingDocuments = [] }: {
   requirements: IntakeRequirement[];
   documents: IntakeDocument[];
   onChange: (documents: IntakeDocument[]) => void;
   disabled: boolean;
+  existingDocuments?: Array<{ id: string; fileRef?: string }>;
 }) {
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
 
   function selectFile(requirement: IntakeRequirement, file?: File) {
     if (!file || disabled) return;
-    if (!/\.(pdf|png|jpe?g|webp)$/i.test(file.name)) {
-      toast.error("Select a PDF, JPEG, PNG or WebP file.");
-      return;
-    }
-    if (file.size === 0 || file.size > 10 * 1024 * 1024) {
-      toast.error("Select a non-empty file up to 10 MB.");
+    const error = getIntakeFileError(file);
+    if (error) {
+      toast.error(error);
       return;
     }
     onChange([...documents.filter((doc) => doc.id !== requirement.id), { ...requirement, file }]);
@@ -69,6 +68,7 @@ export function IntakeDocumentUploads({ requirements, documents, onChange, disab
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {requirements.map((requirement) => {
           const selected = documents.find((doc) => doc.id === requirement.id);
+          const existing = existingDocuments.find(doc => doc.id === requirement.id);
           return (
             <div key={requirement.id}>
               <label className="text-xs font-semibold text-gray-700 block mb-1" htmlFor={`upload-${requirement.id}`}>
@@ -78,7 +78,7 @@ export function IntakeDocumentUploads({ requirements, documents, onChange, disab
                 ref={(element) => { inputs.current[requirement.id] = element; }}
                 id={`upload-${requirement.id}`}
                 type="file"
-                accept=".pdf,.png,.jpg,.jpeg,.webp"
+                accept=".pdf,.png,.jpg,.jpeg"
                 hidden
                 disabled={disabled}
                 onChange={(event) => {
@@ -96,10 +96,10 @@ export function IntakeDocumentUploads({ requirements, documents, onChange, disab
                   selectFile(requirement, event.dataTransfer.files[0]);
                 }}
                 className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
-                aria-label={`${requirement.name}: ${selected?.file.name || "Select document"}`}
-                title={selected?.file.name || "PDF or image, up to 10 MB"}
+                aria-label={`${requirement.name}: ${selected?.file.name || existing?.fileRef || "Select document"}`}
+                title={selected?.file.name || existing?.fileRef || "PDF or image, up to 10 MB"}
               >
-                <span className="block truncate">{selected?.file.name || "Select or drop PDF / image (max 10 MB)"}</span>
+                <span className="block truncate">{selected?.file.name || existing?.fileRef || "Select or drop PDF / image (max 10 MB)"}</span>
               </button>
             </div>
           );

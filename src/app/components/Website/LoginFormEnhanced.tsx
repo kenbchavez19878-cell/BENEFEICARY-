@@ -1,3 +1,4 @@
+import { loginAccount } from "../../services/authService";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -17,10 +18,6 @@ import {
   Menu,
   ChevronDown,
 } from "lucide-react";
-import { getStaffByCredentials } from "../../data/staffAccounts";
-import { getSystemAccountByCredentials } from "../../data/systemAccounts";
-import { getBarangayByCredentials } from "../../data/barangayAccounts";
-import { getBeneficiaryByCredentials } from "../../data/beneficiaryAccounts";
 
 interface LoginFormProps {
   onLogin: (role: string, accountId?: string) => void;
@@ -90,126 +87,17 @@ export function LoginForm({
     e.preventDefault();
     if (!validateForm()) return;
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 1000));
-
-    if (role === "Beneficiary") {
-      const account = getBeneficiaryByCredentials(
-        username.trim(),
-        password,
-      );
-      if (!account) {
-        setErrors({
-          password:
-            "Invalid username or password for Beneficiary account.",
-        });
-        setIsLoading(false);
-        toast.error("Login failed", {
-          description: "Invalid beneficiary credentials.",
-        });
-        return;
-      }
-      toast.success("Login successful!", {
-        description: `Welcome back, ${account.firstName}!`,
-      });
-      onLogin("Beneficiary", account.id);
-      return;
+    try {
+      const account = await loginAccount(username.trim(), password, role);
+      toast.success("Login successful!", { description: `Welcome back, ${account.name}!` });
+      onLogin(account.role, account.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The login service is unavailable.";
+      setErrors({ password: message });
+      toast.error("Login failed", { description: message });
+    } finally {
+      setIsLoading(false);
     }
-
-    if (role === "Staff") {
-      const account = getStaffByCredentials(
-        username.trim(),
-        password,
-      );
-      if (!account) {
-        setErrors({
-          password:
-            "Invalid username or password for Staff account.",
-        });
-        setIsLoading(false);
-        toast.error("Login failed", {
-          description: "Invalid staff credentials.",
-        });
-        return;
-      }
-      toast.success("Login successful!", {
-        description: `Welcome back, ${account.name}!`,
-      });
-      onLogin("Staff", account.id);
-      return;
-    }
-
-    if (role === "HeadAccount") {
-      const account = getSystemAccountByCredentials(
-        username.trim(),
-        password,
-      );
-      if (!account || account.role !== "HeadAccount") {
-        setErrors({
-          password: "Invalid Head Account credentials.",
-        });
-        setIsLoading(false);
-        toast.error("Login failed", {
-          description: "Invalid Head Account credentials.",
-        });
-        return;
-      }
-      toast.success("Login successful!", {
-        description: `Welcome back, ${account.name}!`,
-      });
-      onLogin("HeadAccount", account.id);
-      return;
-    }
-
-    if (role === "Administrator") {
-      const account = getSystemAccountByCredentials(
-        username.trim(),
-        password,
-      );
-      if (!account || account.role !== "Administrator") {
-        setErrors({
-          password: "Invalid Administrator credentials.",
-        });
-        setIsLoading(false);
-        toast.error("Login failed", {
-          description: "Invalid administrator credentials.",
-        });
-        return;
-      }
-      toast.success("Login successful!", {
-        description: `Welcome back, ${account.name}!`,
-      });
-      onLogin("Administrator", account.id);
-      return;
-    }
-
-    if (role === "BarangaySecretary") {
-      const account = getBarangayByCredentials(
-        username.trim(),
-        password,
-      );
-      if (!account) {
-        setErrors({
-          password:
-            "Invalid username or password for Barangay Secretary account.",
-        });
-        setIsLoading(false);
-        toast.error("Login failed", {
-          description:
-            "Invalid Barangay Secretary credentials.",
-        });
-        return;
-      }
-      toast.success("Login successful!", {
-        description: `Welcome back, ${account.firstName}!`,
-      });
-      onLogin("BarangaySecretary", account.id);
-      return;
-    }
-
-    toast.error("Login failed", {
-      description: "Unknown role selected.",
-    });
-    setIsLoading(false);
   }
 
   async function handleResetPassword(e: React.FormEvent) {
@@ -218,20 +106,7 @@ export function LoginForm({
       toast.error("Email is required");
       return;
     }
-    setIsResetting(true);
-    try {
-      await new Promise((r) => setTimeout(r, 1500));
-      toast.success("Password reset email sent!", {
-        description: "Check your email for reset instructions.",
-      });
-      setShowForgotPasswordModal(false);
-      setResetEmail("");
-    } catch {
-      toast.error("Failed to send reset email", {
-        description: "Please try again later.",
-      });
-    }
-    setIsResetting(false);
+    toast.info("Contact your system administrator to reset your password.");
   }
 
   return (

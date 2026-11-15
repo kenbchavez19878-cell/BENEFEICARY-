@@ -1,0 +1,73 @@
+@media print {
+  @page case-summary {
+    margin: 15mm;
+  }
+
+  body:has([data-case-summary-print]) *:not(:has([data-case-summary-print])):not([data-case-summary-print]):not([data-case-summary-print] *) {
+    display: none !important;
+  }
+
+  html:has([data-case-summary-print]),
+  body:has([data-case-summary-print]),
+  body:has([data-case-summary-print]) *:has([data-case-summary-print]) {
+    display: block !important;
+    position: static !important;
+    inset: auto !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    transform: none !important;
+    filter: none !important;
+    backdrop-filter: none !important;
+    contain: none !important;
+  }
+
+  [data-case-summary-print],
+  [data-case-summary-print] * {
+    color: #111 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    overflow: visible !important;
+    overflow-wrap: anywhere;
+  }
+
+  [data-case-summary-print] {
+    page: case-summary;
+    width: 100% !important;
+    font-size: 10pt;
+    line-height: 1.4;
+  }
+
+  [data-case-summary-print-exclude],
+  [data-case-summary-print] button,
+  [data-case-summary-print] textarea,
+  [data-case-summary-print] svg {
+    display: none !important;
+  }
+
+  [data-case-summary-print] .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  [data-case-summary-print] .grid > *,
+  [data-case-summary-print] [data-slot="card-header"] {
+    break-inside: avoid;
+  }
+
+  [data-case-summary-print] p {
+    white-space: pre-wrap;
+  }
+
+  [data-case-summary-print-remarks] {
+    display: block !important;
+  }
+}

@@ -1,12 +1,19 @@
 from decimal import Decimal
+from collections.abc import Mapping
 from django.utils import timezone
 from rest_framework import serializers
 from .models import Beneficiary, WomenAndSoloParentCase, AicsCase
 from .documents import CaseDocumentsMixin
+from .intake import CaseIntakeMixin
 
 
 CAMEL_TO_SNAKE_MAP = {
     'fullName': 'beneficiary_name',
+    'firstName': 'first_name',
+    'middleName': 'middle_name',
+    'lastName': 'last_name',
+    'extensionName': 'extension_name',
+    'incomeStatus': 'income_status',
     'barangay': 'barangay_name',
     'contactNumber': 'contact_number',
     'civilStatus': 'civil_status',
@@ -41,6 +48,8 @@ class CleanEmptyStringMixin:
     3. Guarantees created_at defaults to timezone.now() if received null or blank.
     """
     def to_internal_value(self, data):
+        if not isinstance(data, Mapping):
+            raise serializers.ValidationError({'payload': 'Expected a JSON object.'})
         if hasattr(data, 'copy'):
             clean_data = data.copy()
         elif isinstance(data, dict):
@@ -122,7 +131,9 @@ class BeneficiarySerializer(CleanEmptyStringMixin, serializers.ModelSerializer):
             'id',
             'tracking_id',
             'first_name',
+            'middle_name',
             'last_name',
+            'extension_name',
             'full_name',
             'contact_number',
             'barangay_name',
@@ -138,10 +149,10 @@ class BeneficiarySerializer(CleanEmptyStringMixin, serializers.ModelSerializer):
         read_only_fields = ['id']
 
     def get_full_name(self, obj) -> str:
-        return f"{obj.first_name} {obj.last_name}".strip()
+        return ' '.join(part for part in (obj.first_name, obj.middle_name, obj.last_name, obj.extension_name) if part)
 
 
-class WomenAndSoloParentCaseSerializer(CaseDocumentsMixin, CleanEmptyStringMixin, serializers.ModelSerializer):
+class WomenAndSoloParentCaseSerializer(CaseDocumentsMixin, CaseIntakeMixin, CleanEmptyStringMixin, serializers.ModelSerializer):
     """
     Serializer for Women & Solo Parent case records.
     Safely accepts partial form inputs and lets the model auto-generate unique identifiers.
@@ -175,6 +186,7 @@ class WomenAndSoloParentCaseSerializer(CaseDocumentsMixin, CleanEmptyStringMixin
             'case_number',
             'tracking_id',
             'beneficiary_name',
+            'first_name', 'middle_name', 'last_name', 'extension_name', 'intake_notes', 'workflow_data', 'workflow_version', 'payout_officer_name', 'payout_officer_user',
             'barangay_name',
             'category',
             'category_display',
@@ -183,7 +195,7 @@ class WomenAndSoloParentCaseSerializer(CaseDocumentsMixin, CleanEmptyStringMixin
             'eligibility',
             'eligibility_display',
             'documents_status',
-            'documents',
+            'documents', 'correction_notes',
             'uploaded_files',
             'document_metadata',
             'assessment_notes',
@@ -207,7 +219,7 @@ class WomenAndSoloParentCaseSerializer(CaseDocumentsMixin, CleanEmptyStringMixin
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id']
+        read_only_fields = ['id', 'intake_notes', 'workflow_data', 'workflow_version', 'payout_officer_name', 'payout_officer_user']
 
     def validate_financial_aid_amount(self, value):
         if value is not None and value < Decimal('0.00'):
@@ -220,7 +232,7 @@ class WomenAndSoloParentCaseSerializer(CaseDocumentsMixin, CleanEmptyStringMixin
         return value
 
 
-class AicsCaseSerializer(CaseDocumentsMixin, CleanEmptyStringMixin, serializers.ModelSerializer):
+class AicsCaseSerializer(CaseDocumentsMixin, CaseIntakeMixin, CleanEmptyStringMixin, serializers.ModelSerializer):
     """
     Serializer for AICS Crisis cases.
     Safely accepts partial form inputs and lets the model auto-generate unique identifiers.
@@ -250,9 +262,11 @@ class AicsCaseSerializer(CaseDocumentsMixin, CleanEmptyStringMixin, serializers.
             'case_number',
             'tracking_id',
             'beneficiary_name',
+            'first_name', 'middle_name', 'last_name', 'extension_name', 'intake_notes', 'workflow_data', 'workflow_version', 'payout_officer_name', 'payout_officer_user',
             'barangay_name',
             'contact_number',
             'civil_status',
+            'gender',
             'birth_date',
             'income_status',
             'aics_type',
@@ -264,7 +278,7 @@ class AicsCaseSerializer(CaseDocumentsMixin, CleanEmptyStringMixin, serializers.
             'eligibility',
             'eligibility_display',
             'documents_status',
-            'documents',
+            'documents', 'correction_notes',
             'uploaded_files',
             'document_metadata',
             'assessment_notes',
@@ -277,7 +291,7 @@ class AicsCaseSerializer(CaseDocumentsMixin, CleanEmptyStringMixin, serializers.
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id']
+        read_only_fields = ['id', 'intake_notes', 'workflow_data', 'workflow_version', 'payout_officer_name', 'payout_officer_user']
 
     def validate_approved_amount(self, value):
         if value is not None and value < Decimal('0.00'):
