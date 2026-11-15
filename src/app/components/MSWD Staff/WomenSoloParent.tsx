@@ -1,3 +1,4 @@
+import { matchesCaseTableFilters } from "../../utils/caseTableFilters";
 import { ageFromBirthDate, mapNameFields } from "../../utils/intakeProfile";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "../ui/button";
@@ -157,6 +158,8 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [profileTypeFilter, setProfileTypeFilter] = useState("all");
+  const [newlyRegisteredId, setNewlyRegisteredId] = useState<string | null>(null);
+  useEffect(() => { setNewlyRegisteredId(null); }, [searchQuery, statusFilter, profileTypeFilter]);
 
   // Profiling Modals State
   const [profilingViewModalOpen, setProfilingViewModalOpen] = useState(false);
@@ -250,9 +253,12 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
     };
   }, []);
 
+  const caseLoadRequest = useRef(0);
   const loadCasesFromDb = useCallback(async () => {
+    const requestId = ++caseLoadRequest.current;
     try {
       const rows = await apiGetWomenSoloParentCases();
+      if (requestId !== caseLoadRequest.current) return;
       setProfilingRecords(rows.map(mapDbRowToProfilingRecord));
     } catch (err) {
       console.warn("[PostgreSQL] Could not fetch cases, using local state:", err);
@@ -385,18 +391,8 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
       if (!isPersonallySubmitted) return false;
     }
 
-    const matchesSearch = 
-      record.beneficiaryName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      record.trackingId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      record.barangay.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesStatus = 
-      statusFilter === "all" ? true : record.status.toLowerCase().includes(statusFilter.toLowerCase());
-
-    const matchesProfileType = 
-      profileTypeFilter === "all" ? true : record.profileType.toLowerCase().includes(profileTypeFilter.toLowerCase());
-
-    return matchesSearch && matchesStatus && matchesProfileType;
+    if (record.trackingId === newlyRegisteredId) return true;
+    return matchesCaseTableFilters(record, searchQuery, statusFilter, profileTypeFilter);
   });
 
   return (
@@ -1006,8 +1002,12 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
       <NewWomenSoloParentModal
         isOpen={isNewBeneficiaryModalOpen}
         onClose={() => setIsNewBeneficiaryModalOpen(false)}
-        onSuccess={() => {
-          loadCasesFromDb();
+        onSuccess={(createdRecord) => {
+          ++caseLoadRequest.current;
+          const record = mapDbRowToProfilingRecord(createdRecord);
+          setProfilingRecords(current => [record, ...current.filter(item => item.trackingId !== record.trackingId)]);
+          setNewlyRegisteredId(record.trackingId);
+          void loadCasesFromDb();
         }}
       />
     </div>

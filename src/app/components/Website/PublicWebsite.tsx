@@ -1256,7 +1256,7 @@ function HomePage({
 return (
     <div>
       {/* HERO */}
-      <section className="relative bg-blue-900 text-white overflow-hidden min-h-[88vh] flex items-center">
+      <section data-portal-banner className="relative bg-blue-900 text-white overflow-hidden min-h-[88vh] flex items-center">
         <div
           className="absolute inset-0 opacity-10"
           style={{
@@ -1324,7 +1324,7 @@ return (
                 <button
                   key={cat.id}
                   onClick={() => onNav({ page: "category", category: cat.id })}
-                  className="text-left bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md hover:border-gray-300 transition-all group"
+                  data-portal-card className="text-left bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md hover:border-gray-300 transition-all group"
                 >
                   <div
                     className={`size-11 rounded-xl ${cat.lightBg} flex items-center justify-center mb-4`}
@@ -1391,7 +1391,7 @@ function AboutPage({ onNav }: { onNav: (s: NavState) => void }) {
   return (
     <div>
       {/* Page header */}
-      <div className="bg-blue-900 text-white py-12">
+      <div data-portal-banner className="bg-blue-900 text-white py-12">
         <div className="max-w-7xl mx-auto px-4">
           <nav className="flex items-center gap-2 text-blue-300 text-sm mb-4">
             <button onClick={() => onNav({ page: "home" })} className="hover:text-white">
@@ -1438,7 +1438,7 @@ function AboutPage({ onNav }: { onNav: (s: NavState) => void }) {
             </div>
           </div>
           <div className="space-y-4">
-            <div className="bg-blue-50 rounded-xl p-5 border border-blue-100">
+            <div data-portal-card className="bg-blue-50 rounded-xl p-5 border border-blue-100">
               <h3
                 className="text-sm font-bold text-blue-900 mb-4"
                 style={{ fontFamily: "'Libre Franklin', sans-serif" }}
@@ -1498,7 +1498,7 @@ function AboutPage({ onNav }: { onNav: (s: NavState) => void }) {
 
         {/* Mission & Vision */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-12">
-          <div className="bg-blue-900 text-white rounded-xl p-6">
+          <div data-portal-card className="bg-blue-900 text-white rounded-xl p-6">
             <h3
               className="text-lg font-bold mb-3"
               style={{ fontFamily: "'Libre Franklin', sans-serif" }}
@@ -1509,7 +1509,7 @@ function AboutPage({ onNav }: { onNav: (s: NavState) => void }) {
               To provide comprehensive, accessible, and responsive social welfare and development services that promote the well-being and self-reliance of every individual, family, and community in Calabanga — with special attention to the most vulnerable sectors including children, youth, women, persons with disabilities, senior citizens, and those in crisis situations.
             </p>
           </div>
-          <div className="bg-green-700 text-white rounded-xl p-6">
+          <div data-portal-card className="bg-green-700 text-white rounded-xl p-6">
             <h3
               className="text-lg font-bold mb-3"
               style={{ fontFamily: "'Libre Franklin', sans-serif" }}
@@ -1600,7 +1600,7 @@ function ServicesOverview({ onNav }: { onNav: (s: NavState) => void }) {
 
   return (
     <div>
-      <div className="bg-blue-900 text-white py-12">
+      <div data-portal-banner className="bg-blue-900 text-white py-12">
         <div className="max-w-7xl mx-auto px-4">
           <nav className="flex items-center gap-2 text-blue-300 text-sm mb-4">
             <button onClick={() => onNav({ page: "home" })} className="hover:text-white">
@@ -1684,7 +1684,7 @@ function ServicesOverview({ onNav }: { onNav: (s: NavState) => void }) {
                       category: svc.categoryId,
                     })
                   }
-                  className="text-left bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md hover:border-gray-300 transition-all group"
+                  data-portal-card className="text-left bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md hover:border-gray-300 transition-all group"
                 >
                   <div className="flex items-start gap-3 mb-3">
                     <div
@@ -1784,7 +1784,7 @@ function CategoryDashboard({
                     category: cat.id,
                   })
                 }
-                className="text-left bg-white rounded-xl border border-gray-200 p-6 hover:shadow-md hover:border-gray-300 transition-all group"
+                data-portal-card className="text-left bg-white rounded-xl border border-gray-200 p-6 hover:shadow-md hover:border-gray-300 transition-all group"
               >
                 <div
                   className={`size-11 rounded-xl ${cat.lightBg} flex items-center justify-center mb-4`}
@@ -2094,7 +2094,7 @@ function ServiceDetail({
             </div>
 
             {/* Office Info */}
-            <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <div data-portal-card className="bg-white rounded-xl border border-gray-200 p-5">
               <h3
                 className="font-bold text-gray-900 mb-3 text-sm"
                 style={{ fontFamily: "'Libre Franklin', sans-serif" }}
@@ -2123,7 +2123,7 @@ function ServiceDetail({
 
             {/* Related services */}
             {cat.services.filter(s => s.id !== serviceId).length > 0 && (
-              <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <div data-portal-card className="bg-white rounded-xl border border-gray-200 p-5">
                 <h3
                   className="font-bold text-gray-900 mb-3 text-sm"
                   style={{ fontFamily: "'Libre Franklin', sans-serif" }}
@@ -2179,6 +2179,7 @@ export function PublicWebsite({
 
   return (
     <div
+      data-portal-polish={["home", "about", "services"].includes(nav.page) ? "true" : "false"}
       className="min-h-screen bg-white"
       style={{ fontFamily: "'Source Sans 3', system-ui, sans-serif" }}
     >

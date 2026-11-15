@@ -451,7 +451,7 @@ export function subscribeDataUpdated(callback: () => void | Promise<void>) {
       channel.onmessage = handler;
     }
   } catch {}
-  const poll = window.setInterval(visibleHandler, 5000);
+  const poll = window.setInterval(visibleHandler, 2000);
   window.addEventListener('benefitrack:data-updated', handler);
   window.addEventListener('focus', handler);
   window.addEventListener('storage', storageHandler);

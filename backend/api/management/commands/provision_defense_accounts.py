@@ -26,7 +26,7 @@ class Command(BaseCommand):
                     raise CommandError('An account already exists; use Django password administration to rotate it.')
                 password = item['password']
                 user = get_user_model().objects.create_user(username=item['username'], password=password, first_name=item['name'], is_active=item['active'], is_staff=item['role'] in ('Staff', 'HeadAccount', 'Administrator'))
-                ApplicationAccount.objects.create(user=user, external_id=item['external_id'], role=item['role'], barangay=item['barangay'], beneficiary_tracking_id=item['tracking_id'])
+                ApplicationAccount.objects.create(user=user, external_id=item['external_id'], role=item['role'], barangay=item['barangay'], beneficiary_tracking_id=item['tracking_id'], case_module=item.get('case_module', ''))
                 credentials.append({'username': item['username'], 'role': item['role'], 'password': password})
             with target.open('x', encoding='utf-8') as output:
                 json.dump(credentials, output, indent=2)

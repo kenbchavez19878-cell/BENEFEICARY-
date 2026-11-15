@@ -52,3 +52,17 @@ export function mapIntakeProfile(row: Record<string, any>): IntakeProfile {
     serviceProvider: row.service_provider ?? row.serviceProvider ?? "",
   };
 }
+import { getBarangayById } from "../data/barangayAccounts";
+import { CALABANGA_BARANGAYS } from "../data/calabangaBarangays";
+
+export function defaultIntakeBarangay(): string {
+  if (typeof window !== 'undefined') {
+    const role = sessionStorage.getItem('benefitrack_active_role');
+    if (role === 'BarangaySecretary' || role === 'BarangayRegistrar') {
+      const account = getBarangayById(sessionStorage.getItem('benefitrack_account_id') || '');
+      if (account) return account.assignedBarangay.replace(/^(brgy\.?|barangay)\s+/i, '').trim();
+    }
+  }
+  return CALABANGA_BARANGAYS[0];
+}
+

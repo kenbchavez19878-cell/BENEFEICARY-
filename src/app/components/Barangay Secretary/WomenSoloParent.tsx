@@ -1,3 +1,4 @@
+import { matchesCaseTableFilters } from "../../utils/caseTableFilters";
 import { IntakeDocumentUploads, SOLO_PARENT_REQUIREMENTS, WOMEN_REQUIREMENTS, aicsRequirements } from "../IntakeDocumentUploads";
 import type { IntakeDocument } from "../../services/caseService";
 import { ageFromBirthDate, mapNameFields } from "../../utils/intakeProfile";
@@ -160,6 +161,8 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [profileTypeFilter, setProfileTypeFilter] = useState("all");
+  const [newlyRegisteredId, setNewlyRegisteredId] = useState<string | null>(null);
+  useEffect(() => { setNewlyRegisteredId(null); }, [searchQuery, statusFilter, profileTypeFilter]);
 
   // Profiling Modals State
   const [profilingViewModalOpen, setProfilingViewModalOpen] = useState(false);
@@ -413,18 +416,8 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
       if (!secretaryBarangayClean || recordBarangayClean !== secretaryBarangayClean) return false;
     }
 
-    const matchesSearch = 
-      record.beneficiaryName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      record.trackingId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      record.barangay.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesStatus = 
-      statusFilter === "all" ? true : record.status.toLowerCase().includes(statusFilter.toLowerCase());
-
-    const matchesProfileType = 
-      profileTypeFilter === "all" ? true : record.profileType.toLowerCase().includes(profileTypeFilter.toLowerCase());
-
-    return matchesSearch && matchesStatus && matchesProfileType;
+    if (record.trackingId === newlyRegisteredId) return true;
+    return matchesCaseTableFilters(record, searchQuery, statusFilter, profileTypeFilter);
   });
 
   return (
@@ -1039,8 +1032,12 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
       <NewWomenSoloParentModal
         isOpen={isNewBeneficiaryModalOpen}
         onClose={() => setIsNewBeneficiaryModalOpen(false)}
-        onSuccess={() => {
-          loadCasesFromDb();
+        onSuccess={(createdRecord) => {
+          ++caseLoadRequest.current;
+          const record = mapDbRowToProfilingRecord(createdRecord);
+          setProfilingRecords(current => [record, ...current.filter(item => item.trackingId !== record.trackingId)]);
+          setNewlyRegisteredId(record.trackingId);
+          void loadCasesFromDb();
         }}
       />
     </div>

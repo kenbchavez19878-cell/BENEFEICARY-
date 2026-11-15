@@ -10,7 +10,9 @@ class BarangayCatalogTests(SimpleTestCase):
     def test_catalog_contains_48_unique_names_and_preserves_accents(self):
         self.assertEqual(len(CALABANGA_BARANGAYS), 48)
         self.assertEqual(len(set(CALABANGA_BARANGAYS)), 48)
-        self.assertIn('San Jose-Pèlod', CALABANGA_BARANGAYS)
+        self.assertIn('Binanuaanan Peque\u00f1o', CALABANGA_BARANGAYS)
+        self.assertIn('Quinale', CALABANGA_BARANGAYS)
+        self.assertNotIn('Calabngan-Centro (Town Proper)', CALABANGA_BARANGAYS)
         self.assertIn('Santo Niño', CALABANGA_BARANGAYS)
 
     def test_all_names_fit_models_and_serializer_fields(self):

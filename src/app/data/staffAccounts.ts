@@ -13,16 +13,16 @@ export interface StaffAccount {
 
 export const STAFF_ACCOUNTS: StaffAccount[] = [
   {
-    id: "staff-001",
-    staffId: "MSWD-STAFF-001",
-    name: "Juan Miguel Ramos",
-    username: "juan.ramos",
-
-    role: "Staff",
-    assignedModule: "staff-operations",
-    assignedSubModules: ["applications", "assessment", "disbursement", "monitoring"],
-    status: "Active",
-    position: "Social Welfare Officer",
+    id: "staff-aics", staffId: "MSWD-AICS-DEMO", name: "AICS Staff", username: "staff_aics",
+    role: "Staff", assignedModule: "staff-operations",
+    assignedSubModules: ["aics"],
+    status: "Active", position: "AICS / Crisis Intervention Social Worker",
+  },
+  {
+    id: "staff-women-solo", staffId: "MSWD-WOMEN-DEMO", name: "Women and Solo Parent Staff", username: "staff_women_solo",
+    role: "Staff", assignedModule: "staff-operations",
+    assignedSubModules: ["women-solo-parent"],
+    status: "Active", position: "Women and Solo Parent Staff",
   },
 ];
 

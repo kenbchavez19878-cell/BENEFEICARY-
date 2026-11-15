@@ -1,0 +1,49 @@
+@media screen {
+  [data-portal-polish="true"] [data-portal-banner] {
+    background-image:
+      radial-gradient(ellipse at 82% 18%, rgb(255 255 255 / 10%), transparent 58%),
+      radial-gradient(ellipse at 12% 90%, rgb(255 255 255 / 4%), transparent 48%);
+  }
+
+  [data-portal-polish="true"] button {
+    transition-property: color, background-color, border-color, box-shadow, opacity, translate, scale;
+    transition-duration: 200ms;
+    transition-timing-function: cubic-bezier(0.2, 0.65, 0.3, 1);
+  }
+
+  [data-portal-polish="true"] button:not(:disabled):active {
+    scale: 0.985;
+  }
+
+  [data-portal-polish="true"] button > svg {
+    flex-shrink: 0;
+    vertical-align: middle;
+  }
+
+  [data-portal-polish="true"] [data-portal-card] {
+    transition-property: translate, scale, box-shadow, border-color;
+    transition-duration: 240ms;
+    transition-timing-function: cubic-bezier(0.2, 0.65, 0.3, 1);
+  }
+
+  [data-portal-polish="true"] button:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 3px;
+  }
+}
+
+@media screen and (hover: hover) and (pointer: fine) {
+  [data-portal-polish="true"] [data-portal-card]:hover {
+    translate: 0 -4px;
+    box-shadow: 0 12px 28px -14px rgb(15 23 42 / 24%), 0 0 0 1px rgb(59 130 246 / 12%);
+  }
+}
+
+@media screen and (prefers-reduced-motion: reduce) {
+  [data-portal-polish="true"] button,
+  [data-portal-polish="true"] [data-portal-card] {
+    transition: none !important;
+    translate: none !important;
+    scale: none !important;
+  }
+}

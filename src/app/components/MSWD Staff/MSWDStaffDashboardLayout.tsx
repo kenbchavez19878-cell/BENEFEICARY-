@@ -91,13 +91,15 @@ export function DashboardLayout({ userRole, accountId, onLogout }: DashboardLayo
     ]
   };
 
-  const allowedMenuIds = ROLE_PERMISSIONS[userRole] || ["dashboard"];
+  const allowedMenuIds = userRole === "Staff"
+    ? ["dashboard", ...(assignedSubModules || [])]
+    : ROLE_PERMISSIONS[userRole] || ["dashboard"];
   const menuItems = ALL_MENU_ITEMS.filter((item) => allowedMenuIds.includes(item.id));
 
   // UPDATED: Clean dictionary map rendering your new components
   const renderContent = () => {
     const views: Record<string, React.ReactNode> = {
-      "dashboard": <MainDashboard onNavigate={setActiveMenu} userRole={userRole} />,
+      "dashboard": <MainDashboard onNavigate={(menu) => { if (allowedMenuIds.includes(menu)) setActiveMenu(menu); }} userRole={userRole} />,
       "beneficiary-profiling": <BeneficiaryProfiling />,
       "cicl-assistance": <CiclAssistance />,
       "day-care": <DayCare />,
@@ -110,7 +112,7 @@ export function DashboardLayout({ userRole, accountId, onLogout }: DashboardLayo
       "settings": <SettingsComponent />,
     };
 
-    return views[activeMenu] || (
+    return views[allowedMenuIds.includes(activeMenu) ? activeMenu : "dashboard"] || (
       <div className="flex items-center justify-center h-full">
         <ModuleComingSoon title="Module Not Found" />
       </div>

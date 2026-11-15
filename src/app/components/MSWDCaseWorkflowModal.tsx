@@ -2221,7 +2221,7 @@ function MSWDCaseWorkflowModalInner({
             </div>
 
             {/* Document Body */}
-            <div className="p-8 text-xs font-serif leading-relaxed text-gray-900 space-y-5 bg-white">
+            <div data-gl-print className="p-8 text-xs font-serif leading-relaxed text-gray-900 space-y-5 bg-white">
               {/* Letterhead */}
               <div className="text-center space-y-0.5 border-b-2 border-blue-900 pb-3">
                 <p className="text-[10px] tracking-wider uppercase font-sans">Republic of the Philippines</p>

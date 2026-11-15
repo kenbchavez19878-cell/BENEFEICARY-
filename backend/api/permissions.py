@@ -3,11 +3,18 @@ import re
 
 from django.db.models import Q
 from django.db.models.functions import Trim
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError, PermissionDenied
 from rest_framework.permissions import BasePermission
 
 MUNICIPAL = {'Staff', 'HeadAccount', 'Administrator'}
 SECRETARIES = {'BarangaySecretary', 'BarangayRegistrar'}
+
+
+def module_allowed(user, model):
+    profile = account(user)
+    if role(user) != 'Staff' or not profile or not profile.case_module:
+        return True
+    return model.__name__ == {'aics': 'AicsCase', 'women-solo-parent': 'WomenAndSoloParentCase'}.get(profile.case_module)
 
 
 def account(user):
@@ -30,7 +37,14 @@ def normalize_barangay(value):
     return re.sub(r'^(brgy\.?|barangay)\s+', '', str(value or '').strip(), flags=re.I).strip().casefold()
 
 
+def assigned_intake_barangay(user):
+    profile = account(user)
+    return re.sub(r'^(brgy\.?|barangay)\s+', '', profile.barangay.strip(), flags=re.I).strip() if profile else ''
+
+
 def scope_cases(queryset, user):
+    if not module_allowed(user, queryset.model):
+        return queryset.none()
     identity = role(user)
     if identity in MUNICIPAL:
         return queryset
@@ -65,6 +79,9 @@ class CaseAccess(BasePermission):
         identity = role(request.user)
         if not identity:
             return False
+        queryset = getattr(view, 'queryset', None)
+        if queryset is not None and not module_allowed(request.user, queryset.model):
+            return False
         if request.method in ('GET', 'HEAD', 'OPTIONS'):
             return True
         if identity in MUNICIPAL:
@@ -72,12 +89,13 @@ class CaseAccess(BasePermission):
         if identity not in SECRETARIES:
             return False
         data = payload(request)
+        creating = getattr(view, 'action', '') == 'create'
         assigned = normalize_barangay(account(request.user).barangay)
         if not assigned:
             return False
         for field in ('barangay', 'barangay_name'):
-            if field in data and normalize_barangay(data[field]) != assigned:
-                return False
+            if field in data and (not creating or data[field] not in (None, '')) and normalize_barangay(data[field]) != assigned:
+                raise PermissionDenied({'barangay': f'Register this intake under your assigned barangay: {assigned_intake_barangay(request.user)}.'})
         forbidden = {
             'eligibility', 'eligibilityDetails', 'socialAssessment', 'intakeInterview', 'servicePlan', 'serviceRelease',
             'documents_status', 'monitoring_logs', 'correctionNotes', 'payout_officer_user', 'payout_officer_name',
@@ -85,13 +103,23 @@ class CaseAccess(BasePermission):
             'vulnerability_level',
             'assessment_notes', 'spic_number', 'spicNumber', 'booklet_number', 'purchaseBookletNumber', 'referrals',
         }
+        if creating:
+            # Initial notes belong to intake, not to a municipal assessment decision.
+            blocked = {key: 'This field is reserved for MSWD processing after endorsement.'
+                       for key in forbidden - {'assessment_notes'}
+                       if key in data and data[key] not in (None, '', {}, [])}
+            if data.get('status', 'BARANGAY_ENDORSED') != 'BARANGAY_ENDORSED':
+                blocked['status'] = 'New intake records must start at BARANGAY_ENDORSED.'
+            if blocked:
+                raise ValidationError(blocked)
+            return True
         if any(key in data for key in forbidden) or data.get('status', 'BARANGAY_ENDORSED') != 'BARANGAY_ENDORSED':
             return False
-        if getattr(view, 'action', '') == 'create':
-            return normalize_barangay(data.get('barangay_name', data.get('barangay'))) == normalize_barangay(account(request.user).barangay)
         return True
 
     def has_object_permission(self, request, view, obj):
+        if not module_allowed(request.user, type(obj)):
+            return False
         identity = role(request.user)
         if identity in MUNICIPAL:
             return True

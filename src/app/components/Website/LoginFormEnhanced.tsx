@@ -1,3 +1,4 @@
+import demoAccounts from "../../../../backend/api/demo_accounts.json";
 import { loginAccount } from "../../services/authService";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -46,9 +47,12 @@ export function LoginForm({
   onBack,
   onNavigateToRegister,
 }: LoginFormProps) {
-  const [role, setRole] = useState<RoleId>("");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [{ role, username, password }, setCredentials] = useState<{
+    role: RoleId; username: string; password: string;
+  }>({ role: "", username: "", password: "" });
+  const setRole = (role: RoleId) => setCredentials(current => ({ ...current, role }));
+  const setUsername = (username: string) => setCredentials(current => ({ ...current, username }));
+  const setPassword = (password: string) => setCredentials(current => ({ ...current, password }));
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -65,6 +69,12 @@ export function LoginForm({
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
   const [isResetting, setIsResetting] = useState(false);
+
+  function fillDemoCredentials(role: Exclude<RoleId, "">, username: string, password: string) {
+    if (isLoading) return;
+    setCredentials({ role, username, password });
+    setErrors({});
+  }
 
   function validateForm() {
     const e: {
@@ -508,75 +518,19 @@ export function LoginForm({
                     <span className="text-[10px] text-blue-700 font-normal">Click to auto-fill</span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-[11px]">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRole("Beneficiary");
-                        setUsername("maria.reyes");
-                        setPassword("Beneficiary@2026");
-                        if (errors.role || errors.username || errors.password) setErrors({});
-                      }}
-                      className="text-left p-1.5 hover:bg-white rounded border border-blue-100 transition-colors"
-                    >
-                      <span className="font-semibold text-blue-900 block">Beneficiary</span>
-                      <span className="text-gray-600 font-mono text-[10px]">maria.reyes / Beneficiary@2026</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRole("BarangaySecretary");
-                        setUsername("maria.lourdes");
-                        setPassword("Barangay@2026");
-                        if (errors.role || errors.username || errors.password) setErrors({});
-                      }}
-                      className="text-left p-1.5 hover:bg-white rounded border border-blue-100 transition-colors"
-                    >
-                      <span className="font-semibold text-blue-900 block">Barangay Secretary</span>
-                      <span className="text-gray-600 font-mono text-[10px]">maria.lourdes / Barangay@2026</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRole("Staff");
-                        setUsername("juan.ramos");
-                        setPassword("MSWDStaff@2026");
-                        if (errors.role || errors.username || errors.password) setErrors({});
-                      }}
-                      className="text-left p-1.5 hover:bg-white rounded border border-blue-100 transition-colors"
-                    >
-                      <span className="font-semibold text-blue-900 block">MSWD Staff</span>
-                      <span className="text-gray-600 font-mono text-[10px]">juan.ramos / MSWDStaff@2026</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRole("HeadAccount");
-                        setUsername("maria.villanueva");
-                        setPassword("MSWDHead@2026");
-                        if (errors.role || errors.username || errors.password) setErrors({});
-                      }}
-                      className="text-left p-1.5 hover:bg-white rounded border border-blue-100 transition-colors"
-                    >
-                      <span className="font-semibold text-blue-900 block">MSWD Head</span>
-                      <span className="text-gray-600 font-mono text-[10px]">maria.villanueva / MSWDHead@2026</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRole("Administrator");
-                        setUsername("rafael.mendoza");
-                        setPassword("Admin@2026");
-                        if (errors.role || errors.username || errors.password) setErrors({});
-                      }}
-                      className="text-left p-1.5 hover:bg-white sm:col-span-2 rounded border border-blue-100 transition-colors"
-                    >
-                      <span className="font-semibold text-blue-900 block">Administrator</span>
-                      <span className="text-gray-600 font-mono text-[10px]">rafael.mendoza / Admin@2026</span>
-                    </button>
+                    {demoAccounts.map((account, index) => (
+                      <button
+                        key={account.username}
+                        type="button"
+                        onClick={() => fillDemoCredentials(account.role as Exclude<RoleId, "">, account.username, account.password)}
+                        className={index === demoAccounts.length - 1
+                          ? "text-left p-1.5 hover:bg-white sm:col-span-2 rounded border border-blue-100 transition-colors"
+                          : "text-left p-1.5 hover:bg-white rounded border border-blue-100 transition-colors"}
+                      >
+                        <span className="font-semibold text-blue-900 block">{account.label}</span>
+                        <span className="text-gray-600 font-mono text-[10px]">{account.username} / {account.password}</span>
+                      </button>
+                    ))}
                   </div>
                 </div>
 

@@ -1,52 +1,38 @@
 [
   {
-    "external_id": "brgy-001",
-    "username": "maria.lourdes",
-    "name": "Maria Lourdes Villanueva",
-    "role": "BarangaySecretary",
-    "barangay": "Brgy. San Juan",
-    "tracking_id": "",
-    "active": true,
-    "password": "Barangay@2026"
-  },
-  {
-    "external_id": "staff-001",
-    "username": "juan.ramos",
-    "name": "Juan Miguel Ramos",
+    "external_id": "staff-aics",
+    "username": "staff_aics",
+    "password": "Staff_AICS@2026!",
+    "name": "AICS / Crisis Intervention Social Worker",
+    "label": "AICS Staff",
     "role": "Staff",
     "barangay": "",
     "tracking_id": "",
     "active": true,
-    "password": "MSWDStaff@2026"
+    "case_module": "aics"
   },
   {
-    "external_id": "head-001",
-    "username": "maria.villanueva",
-    "name": "Maria Elena Villanueva",
-    "role": "HeadAccount",
+    "external_id": "staff-women-solo",
+    "username": "staff_women_solo",
+    "password": "Staff_Women@2026!",
+    "name": "Women and Solo Parent Staff",
+    "label": "Women and Solo Parent Staff",
+    "role": "Staff",
     "barangay": "",
     "tracking_id": "",
     "active": true,
-    "password": "MSWDHead@2026"
+    "case_module": "women-solo-parent"
   },
   {
-    "external_id": "admin-001",
-    "username": "rafael.mendoza",
-    "name": "Rafael Antonio Mendoza",
-    "role": "Administrator",
-    "barangay": "",
+    "external_id": "barangay-secretary-demo",
+    "username": "barangaysecretary",
+    "password": "Barangay_Sec@2026!",
+    "name": "Barangay Secretary",
+    "label": "Barangay Secretary",
+    "role": "BarangaySecretary",
+    "barangay": "Brgy. San Vicente",
     "tracking_id": "",
     "active": true,
-    "password": "Admin@2026"
-  },
-  {
-    "external_id": "ben-001",
-    "username": "maria.reyes",
-    "name": "Maria Cristina Santos Reyes",
-    "role": "Beneficiary",
-    "barangay": "Brgy. San Juan",
-    "tracking_id": "BEN-2026-000125",
-    "active": true,
-    "password": "Beneficiary@2026"
+    "case_module": ""
   }
 ]

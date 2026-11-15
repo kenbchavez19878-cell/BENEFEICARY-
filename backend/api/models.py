@@ -153,6 +153,7 @@ class ApplicationAccount(models.Model):
     role = models.CharField(max_length=40, choices=[(value, value) for value in ('Administrator', 'HeadAccount', 'Staff', 'BarangaySecretary', 'BarangayRegistrar', 'Beneficiary')])
     barangay = models.CharField(max_length=100, blank=True)
     beneficiary_tracking_id = models.CharField(max_length=80, blank=True)
+    case_module = models.CharField(max_length=30, blank=True, default='', choices=[('aics', 'AICS'), ('women-solo-parent', 'Women & Solo Parent')])
 
 
 class CaseIntakeFields(models.Model):

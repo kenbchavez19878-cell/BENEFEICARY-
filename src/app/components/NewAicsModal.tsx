@@ -1,3 +1,4 @@
+import { defaultIntakeBarangay } from "../utils/intakeProfile";
 import { CALABANGA_BARANGAYS } from "../data/calabangaBarangays";
 import React, { useState, useRef, useEffect } from "react";
 import { X, HeartHandshake, CheckCircle2, Stethoscope, Cross, Bus, DollarSign, MapPin, AlertCircle } from "lucide-react";
@@ -5,13 +6,13 @@ import { Button } from "./ui/button";
 import { toast } from "sonner";
 import { IntakeDocumentUploads, aicsRequirements } from "./IntakeDocumentUploads";
 import { getIntakeFileError } from "../utils/intakeFileValidation";
-import type { IntakeDocument } from "../services/caseService";
+import type { IntakeDocument, DbCaseRecord } from "../services/caseService";
 import { apiCreateAicsCase, saveSecretarySubmittedCase } from "../services/caseService";
 
 interface NewAicsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (record: DbCaseRecord) => void;
 }
 
 
@@ -43,7 +44,7 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
   const [birthDate, setBirthDate] = useState("");
   const [gender, setGender] = useState("FEMALE");
   const [civilStatus, setCivilStatus] = useState("SINGLE");
-  const [barangay, setBarangay] = useState("San Juan");
+  const [barangay, setBarangay] = useState(defaultIntakeBarangay);
   const [contactNumber, setContactNumber] = useState("");
   const [incomeStatus, setIncomeStatus] = useState("Indigent / No Regular Income");
   const [crisisType, setCrisisType] = useState<"MEDICAL" | "BURIAL" | "TRANSPORTATION" | "ECONOMIC_RELIEF" | "BALIK_PROBINSYA">("MEDICAL");
@@ -59,7 +60,7 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
     setTrackingNumber(`AICS-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`);
     setFirstName(""); setMiddleName(""); setLastName(""); setExtensionName("");
     setBirthDate(""); setContactNumber(""); setDocuments([]);
-    setGender("FEMALE"); setBarangay("San Juan"); setInitialStatus("BARANGAY_ENDORSED");
+    setGender("FEMALE"); setBarangay(defaultIntakeBarangay()); setInitialStatus("BARANGAY_ENDORSED");
     setCivilStatus("SINGLE"); setIncomeStatus("Indigent / No Regular Income");
     setCrisisType("MEDICAL"); setRequestedAmount(5000);
     setCrisisSummary(""); setServiceProvider("");
@@ -120,7 +121,7 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
       saveSecretarySubmittedCase(assignedTracking);
       toast.success(`AICS crisis intake registered successfully with Tracking ID: ${assignedTracking}`);
       setDocuments([]);
-      onSuccess();
+      onSuccess(createdRecord);
       onClose();
     } catch (err: any) {
       console.error("Error creating AICS case:", err);

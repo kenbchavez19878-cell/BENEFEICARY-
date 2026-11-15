@@ -5,6 +5,7 @@ from rest_framework import serializers
 from .models import Beneficiary, WomenAndSoloParentCase, AicsCase
 from .documents import CaseDocumentsMixin
 from .intake import CaseIntakeMixin
+from .permissions import role, SECRETARIES, assigned_intake_barangay
 
 
 CAMEL_TO_SNAKE_MAP = {
@@ -56,6 +57,11 @@ class CleanEmptyStringMixin:
             clean_data = dict(data)
         else:
             return super().to_internal_value(data)
+
+        request = self.context.get('request')
+        if self.instance is None and request is not None and role(request.user) in SECRETARIES:
+            if not clean_data.get('barangay_name') and not clean_data.get('barangay'):
+                clean_data['barangay_name'] = assigned_intake_barangay(request.user)
 
         # 1. Map camelCase frontend fields to backend model fields
         for camel_k, snake_k in CAMEL_TO_SNAKE_MAP.items():

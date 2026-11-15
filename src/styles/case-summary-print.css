@@ -3,13 +3,13 @@
     margin: 15mm;
   }
 
-  body:has([data-case-summary-print]) *:not(:has([data-case-summary-print])):not([data-case-summary-print]):not([data-case-summary-print] *) {
+  body:has([data-case-summary-print]):not(:has([data-gl-print])) *:not(:has([data-case-summary-print])):not([data-case-summary-print]):not([data-case-summary-print] *) {
     display: none !important;
   }
 
   html:has([data-case-summary-print]),
-  body:has([data-case-summary-print]),
-  body:has([data-case-summary-print]) *:has([data-case-summary-print]) {
+  body:has([data-case-summary-print]):not(:has([data-gl-print])),
+  body:has([data-case-summary-print]):not(:has([data-gl-print])) *:has([data-case-summary-print]) {
     display: block !important;
     position: static !important;
     inset: auto !important;

@@ -1,3 +1,4 @@
+import { defaultIntakeBarangay } from "../utils/intakeProfile";
 import { CALABANGA_BARANGAYS } from "../data/calabangaBarangays";
 import React, { useState, useRef, useEffect } from "react";
 import { X, UserPlus, CheckCircle2, ShieldCheck, HeartHandshake, Baby, AlertCircle } from "lucide-react";
@@ -5,13 +6,13 @@ import { Button } from "./ui/button";
 import { toast } from "sonner";
 import { IntakeDocumentUploads, SOLO_PARENT_REQUIREMENTS, WOMEN_REQUIREMENTS } from "./IntakeDocumentUploads";
 import { getIntakeFileError } from "../utils/intakeFileValidation";
-import type { IntakeDocument } from "../services/caseService";
+import type { IntakeDocument, DbCaseRecord } from "../services/caseService";
 import { apiCreateWomenSoloParentCase, saveSecretarySubmittedCase } from "../services/caseService";
 
 interface NewWomenSoloParentModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (record: DbCaseRecord) => void;
 }
 
 
@@ -37,7 +38,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
   const [birthDate, setBirthDate] = useState("");
   const [gender, setGender] = useState("FEMALE");
   const [civilStatus, setCivilStatus] = useState("SINGLE_PARENT");
-  const [barangay, setBarangay] = useState("San Juan");
+  const [barangay, setBarangay] = useState(defaultIntakeBarangay);
   const [contactNumber, setContactNumber] = useState("");
   const [indigencyLevel, setIndigencyLevel] = useState("Low Income (₱5,000 - ₱10,000/mo)");
   const [category, setCategory] = useState<"SOLO_PARENT" | "WOMEN_VAWC">("SOLO_PARENT");
@@ -53,7 +54,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
     setTrackingNumber(`BEN-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`);
     setFirstName(""); setMiddleName(""); setLastName(""); setExtensionName("");
     setBirthDate(""); setContactNumber(""); setDocuments([]);
-    setGender("FEMALE"); setBarangay("San Juan"); setInitialStatus("BARANGAY_ENDORSED");
+    setGender("FEMALE"); setBarangay(defaultIntakeBarangay()); setInitialStatus("BARANGAY_ENDORSED");
     setCivilStatus("SINGLE_PARENT"); setCategory("SOLO_PARENT");
     setDependentChildren(2); setSoloParentReason("Unmarried Parent");
     setIndigencyLevel("Low Income (₱5,000 - ₱10,000/mo)");
@@ -106,7 +107,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
       saveSecretarySubmittedCase(assignedTracking);
       toast.success(`Beneficiary profile registered successfully with Tracking ID: ${assignedTracking}`);
       setDocuments([]);
-      onSuccess();
+      onSuccess(createdRecord);
       onClose();
     } catch (err: any) {
       console.error("Error creating beneficiary:", err);

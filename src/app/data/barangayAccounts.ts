@@ -18,15 +18,15 @@ export interface BarangayAccount {
 
 export const BARANGAY_ACCOUNTS: BarangayAccount[] = [
   {
-    id: "brgy-001",
+    id: "barangay-secretary-demo",
     employeeId: "BRGY-SEC-001",
     name: "Maria Lourdes Villanueva",
     firstName: "Maria Lourdes",
-    username: "maria.lourdes",
+    username: "barangaysecretary",
 
     role: "BarangaySecretary",
     position: "Barangay Secretary",
-    assignedBarangay: "Brgy. San Juan",
+    assignedBarangay: "Brgy. San Vicente",
     municipality: "Calabanga",
     province: "Camarines Sur",
     mobile: "0918-654-3210",
