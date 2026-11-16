@@ -1,5 +1,5 @@
 import { matchesCaseTableFilters } from "../../utils/caseTableFilters";
-import { ageFromBirthDate, mapNameFields } from "../../utils/intakeProfile";
+import { ageFromBirthDate, mapNameFields, mapReviewProfileFields } from "../../utils/intakeProfile";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
@@ -230,7 +230,7 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
         residencyStatus: "Permanent Resident",
         employmentStatus: "Informal Worker",
         occupation: "Informal Worker",
-        monthlyPersonalIncome: `₱${(Number(row.financial_aid_amount) || 3000).toLocaleString()}`,
+        monthlyPersonalIncome: `₱${Number(row.financial_aid_amount ?? 1000).toLocaleString()}`,
         sourceOfIncome: "Informal Work",
         householdIncome: "₱12,000",
         economicClassification: "Low Income Household",
@@ -249,6 +249,7 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
         approvingOffice: "MSWD Calabanga",
         remarks: row.assessment_notes || "Documented and verified under municipal welfare program.",
         householdMembers: [],
+        ...mapReviewProfileFields(row),
       },
     };
   }, []);
@@ -495,20 +496,20 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                     
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Date of Birth</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.birthdate} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.birthdate} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Age</label>
-                      <input type="number" disabled readOnly defaultValue={selectedProfile.fullInfo.age} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="number" disabled readOnly value={selectedProfile.fullInfo.age} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Place of Birth</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.birthPlace} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.birthPlace} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
 
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Sex at Birth</label>
-                      <select disabled defaultValue={selectedProfile.fullInfo.sexAtBirth} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
+                      <select disabled value={selectedProfile.fullInfo.sexAtBirth} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
                         <option>Female</option>
                         <option>Male</option>
                         <option>Other</option>
@@ -516,7 +517,7 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Civil Status</label>
-                      <select disabled defaultValue={selectedProfile.fullInfo.civilStatus} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
+                      <select disabled value={selectedProfile.fullInfo.civilStatus} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
                         <option>Single</option>
                         <option>Married</option>
                         <option>Widowed</option>
@@ -528,16 +529,16 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Nationality</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.nationality} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.nationality} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Religion</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.religion} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.religion} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
 
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Highest Educational Attainment</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.highestEducationalAttainment} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.highestEducationalAttainment} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                   </div>
                 </section>
@@ -548,25 +549,25 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-sm">
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Contact Number</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.contactNumber} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.contactNumber} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Email</label>
-                      <input type="email" disabled readOnly defaultValue={selectedProfile.fullInfo.email} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="email" disabled readOnly value={selectedProfile.fullInfo.email} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
 
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Barangay</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.barangay} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.barangay} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Purok / Zone</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.purokZone} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.purokZone} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
 
                     <div className="md:col-span-4">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Street Address</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.streetAddress} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.streetAddress} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                   </div>
                 </section>
@@ -577,11 +578,11 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-sm">
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Employment Status</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.employmentStatus} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.employmentStatus} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Monthly Personal Income</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.monthlyPersonalIncome} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.monthlyPersonalIncome} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                   </div>
                 </section>
@@ -592,27 +593,27 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-sm">
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">4Ps Beneficiary Status</label>
-                      <select disabled defaultValue={selectedProfile.fullInfo.is4Ps ? "Yes" : "No"} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
+                      <select disabled value={selectedProfile.fullInfo.is4Ps ? "Yes" : "No"} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
                         <option value="Yes">Yes</option>
                         <option value="No">No</option>
                       </select>
                     </div>
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">4Ps Household ID Number</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.fourPsId} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.fourPsId} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div></div> {/* Spacer */}
 
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Indigenous Person (IP) Status</label>
-                      <select disabled defaultValue={selectedProfile.fullInfo.isIP ? "Yes" : "No"} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
+                      <select disabled value={selectedProfile.fullInfo.isIP ? "Yes" : "No"} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
                         <option value="Yes">Yes</option>
                         <option value="No">No</option>
                       </select>
                     </div>
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">IP Tribe / Affiliation</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.ipTribe} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.ipTribe} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                   </div>
                 </section>

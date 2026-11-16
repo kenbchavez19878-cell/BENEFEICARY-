@@ -1,3 +1,4 @@
+import { openDocumentPreview } from "../services/documentService";
 import React, { useRef } from "react";
 import { toast } from "sonner";
 import type { IntakeDocument } from "../services/caseService";
@@ -46,7 +47,7 @@ export function IntakeDocumentUploads({ requirements, documents, onChange, disab
   documents: IntakeDocument[];
   onChange: (documents: IntakeDocument[]) => void;
   disabled: boolean;
-  existingDocuments?: Array<{ id: string; fileRef?: string }>;
+  existingDocuments?: Array<{ id: string; fileRef?: string; fileUrl?: string; replacementRequired?: boolean }>;
 }) {
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -57,6 +58,7 @@ export function IntakeDocumentUploads({ requirements, documents, onChange, disab
       toast.error(error);
       return;
     }
+    toast.dismiss('document-resubmission');
     onChange([...documents.filter((doc) => doc.id !== requirement.id), { ...requirement, file }]);
   }
 
@@ -68,7 +70,9 @@ export function IntakeDocumentUploads({ requirements, documents, onChange, disab
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {requirements.map((requirement) => {
           const selected = documents.find((doc) => doc.id === requirement.id);
-          const existing = existingDocuments.find(doc => doc.id === requirement.id);
+          const existing = existingDocuments.find(doc => String(doc.id) === String(requirement.id));
+          const existingName = existing?.fileRef || (existing?.fileUrl ? 'Previously uploaded document' : '');
+          const filename = selected?.file.name || existingName;
           return (
             <div key={requirement.id}>
               <label className="text-xs font-semibold text-gray-700 block mb-1" htmlFor={`upload-${requirement.id}`}>
@@ -96,11 +100,27 @@ export function IntakeDocumentUploads({ requirements, documents, onChange, disab
                   selectFile(requirement, event.dataTransfer.files[0]);
                 }}
                 className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
-                aria-label={`${requirement.name}: ${selected?.file.name || existing?.fileRef || "Select document"}`}
-                title={selected?.file.name || existing?.fileRef || "PDF or image, up to 10 MB"}
+                aria-label={`${requirement.name}: ${filename || "Select document"}`}
+                title={filename || "PDF or image, up to 10 MB"}
               >
-                <span className="block truncate">{selected?.file.name || existing?.fileRef || "Select or drop PDF / image (max 10 MB)"}</span>
+                <span className="block truncate">{selected ? `Selected: ${filename}` : existingName ? `Uploaded: ${filename}` : "Select or drop PDF / image (max 10 MB)"}</span>
               </button>
+              {existing?.replacementRequired && (
+                <p role={selected ? 'status' : 'alert'} className="mt-1 text-xs text-gray-600">
+                  {selected ? 'Replacement selected; ready to resubmit.' : 'A replacement is required for this document.'}
+                </p>
+              )}
+              {existing?.fileUrl && (
+                <a href={existing.fileUrl} target="_blank" rel="noopener noreferrer"
+                  className="mt-1 inline-block text-xs text-blue-700 underline"
+                  aria-label={`View uploaded ${requirement.name}`}
+                  onClick={event => {
+                    event.preventDefault();
+                    void openDocumentPreview(existing.fileUrl!).catch(error => toast.error(error instanceof Error ? error.message : 'Could not open the uploaded document.'));
+                  }}>
+                  {selected ? 'View previous upload (will be replaced on save)' : 'View uploaded file'}
+                </a>
+              )}
             </div>
           );
         })}

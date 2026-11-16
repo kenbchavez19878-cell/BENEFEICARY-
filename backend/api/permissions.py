@@ -3,7 +3,7 @@ import re
 
 from django.db.models import Q
 from django.db.models.functions import Trim
-from rest_framework.exceptions import ValidationError, PermissionDenied
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import BasePermission
 
 MUNICIPAL = {'Staff', 'HeadAccount', 'Administrator'}
@@ -12,13 +12,16 @@ SECRETARIES = {'BarangaySecretary', 'BarangayRegistrar'}
 
 def module_allowed(user, model):
     profile = account(user)
-    if role(user) != 'Staff' or not profile or not profile.case_module:
+    if role(user) != 'Staff' or not profile or not profile.case_module.strip():
         return True
-    return model.__name__ == {'aics': 'AicsCase', 'women-solo-parent': 'WomenAndSoloParentCase'}.get(profile.case_module)
+    module = re.sub(r'[^a-z0-9]', '', profile.case_module.casefold())
+    expected = {'aics': 'AicsCase', 'womensoloparent': 'WomenAndSoloParentCase',
+                'womenandsoloparent': 'WomenAndSoloParentCase'}.get(module)
+    return model.__name__ == expected
 
 
 def account(user):
-    if not user or not user.is_authenticated:
+    if not user or not user.is_authenticated or not user.is_active:
         return None
     try:
         return user.application_account
@@ -27,9 +30,14 @@ def account(user):
 
 
 def role(user):
+    if not user or not user.is_authenticated or not user.is_active:
+        return ''
     profile = account(user)
     if profile:
-        return profile.role
+        key = re.sub(r'[^a-z0-9]', '', profile.role.casefold())
+        roles = {re.sub(r'[^a-z0-9]', '', name.casefold()): name for name in MUNICIPAL | SECRETARIES | {'Beneficiary'}}
+        roles.update({'mswdstaff': 'Staff', 'brgysec': 'BarangaySecretary'})
+        return roles.get(key, '')
     return 'Administrator' if user and user.is_authenticated and user.is_superuser else 'Staff' if user and user.is_authenticated and user.is_staff else ''
 
 
@@ -51,7 +59,9 @@ def scope_cases(queryset, user):
     profile = account(user)
     if profile and identity in SECRETARIES and normalize_barangay(profile.barangay):
         barangay = normalize_barangay(profile.barangay)
+        own = Q(submitted_by=user) if hasattr(queryset.model, 'submitted_by') else Q(pk__in=[])
         return queryset.annotate(_access_barangay=Trim('barangay_name')).filter(
+            own |
             Q(_access_barangay__iexact=barangay) | Q(_access_barangay__iexact=f'Brgy. {barangay}')
             | Q(_access_barangay__iexact=f'Brgy {barangay}') | Q(_access_barangay__iexact=f'Barangay {barangay}')
         )
@@ -75,30 +85,28 @@ def payload(request):
 
 
 class CaseAccess(BasePermission):
+    message = "Your authenticated account is not permitted to perform this workflow action."
     def has_permission(self, request, view):
         identity = role(request.user)
         if not identity:
+            self.message = 'Please sign in with an active account before processing cases.'
             return False
         queryset = getattr(view, 'queryset', None)
         if queryset is not None and not module_allowed(request.user, queryset.model):
+            self.message = 'This case is outside your assigned staff program.'
             return False
         if request.method in ('GET', 'HEAD', 'OPTIONS'):
             return True
         if identity in MUNICIPAL:
             return True
         if identity not in SECRETARIES:
+            self.message = f'Your signed-in role is {identity}. MSWD Staff is required to process case reviews.'
             return False
         data = payload(request)
         creating = getattr(view, 'action', '') == 'create'
-        assigned = normalize_barangay(account(request.user).barangay)
-        if not assigned:
-            return False
-        for field in ('barangay', 'barangay_name'):
-            if field in data and (not creating or data[field] not in (None, '')) and normalize_barangay(data[field]) != assigned:
-                raise PermissionDenied({'barangay': f'Register this intake under your assigned barangay: {assigned_intake_barangay(request.user)}.'})
         forbidden = {
             'eligibility', 'eligibilityDetails', 'socialAssessment', 'intakeInterview', 'servicePlan', 'serviceRelease',
-            'documents_status', 'monitoring_logs', 'correctionNotes', 'payout_officer_user', 'payout_officer_name',
+            'documents_status', 'monitoring_logs', 'correctionNotes', 'requiredDocumentReplacements', 'payout_officer_user', 'payout_officer_name',
             'release_method', 'releaseMethod', 'payout_date', 'payoutDate', 'guarantee_letter_number', 'guaranteeLetterNumber',
             'vulnerability_level',
             'assessment_notes', 'spic_number', 'spicNumber', 'booklet_number', 'purchaseBookletNumber', 'referrals',
@@ -114,11 +122,13 @@ class CaseAccess(BasePermission):
                 raise ValidationError(blocked)
             return True
         if any(key in data for key in forbidden) or data.get('status', 'BARANGAY_ENDORSED') != 'BARANGAY_ENDORSED':
+            self.message = f'This tab is signed in as {identity}. Sign in as MSWD Staff to acknowledge or process this case.'
             return False
         return True
 
     def has_object_permission(self, request, view, obj):
         if not module_allowed(request.user, type(obj)):
+            self.message = 'This case is outside your assigned staff program.'
             return False
         identity = role(request.user)
         if identity in MUNICIPAL:
@@ -126,7 +136,9 @@ class CaseAccess(BasePermission):
         profile = account(request.user)
         if identity == 'Beneficiary':
             return request.method in ('GET', 'HEAD', 'OPTIONS') and bool(profile.beneficiary_tracking_id) and obj.tracking_id == profile.beneficiary_tracking_id
-        if not profile or normalize_barangay(obj.barangay_name) != normalize_barangay(profile.barangay):
+        owns_intake = getattr(obj, 'submitted_by_id', None) == request.user.pk
+        if not profile or (not owns_intake and normalize_barangay(obj.barangay_name) != normalize_barangay(profile.barangay)):
+            self.message = f'This case is not accessible to your signed-in role ({identity}). Sign in with the account assigned to review it.'
             return False
         if request.method in ('GET', 'HEAD', 'OPTIONS'):
             return True

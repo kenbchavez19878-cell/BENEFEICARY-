@@ -1,7 +1,7 @@
 import { matchesCaseTableFilters } from "../../utils/caseTableFilters";
 import { IntakeDocumentUploads, SOLO_PARENT_REQUIREMENTS, WOMEN_REQUIREMENTS, aicsRequirements } from "../IntakeDocumentUploads";
 import type { IntakeDocument } from "../../services/caseService";
-import { ageFromBirthDate, mapNameFields } from "../../utils/intakeProfile";
+import { ageFromBirthDate, mapNameFields, mapReviewProfileFields } from "../../utils/intakeProfile";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
@@ -192,6 +192,7 @@ export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: Fro
 
   // New Beneficiary Registration Modal State
   const [isNewBeneficiaryModalOpen, setIsNewBeneficiaryModalOpen] = useState(false);
+  const [returnedIntakeRecord, setReturnedIntakeRecord] = useState<any>(null);
 
   // Helper to map PostgreSQL AICS record to UI ProfilingRecord
   const mapDbRowToAicsRecord = useCallback((row: any): ProfilingRecord => {
@@ -235,7 +236,7 @@ export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: Fro
         residencyStatus: "Permanent Resident",
         employmentStatus: "Informal Worker",
         occupation: "Informal Worker",
-        monthlyPersonalIncome: `₱${(Number(row.approved_amount) || 5000).toLocaleString()}`,
+        monthlyPersonalIncome: `₱${Number(row.approved_amount ?? 1000).toLocaleString()}`,
         sourceOfIncome: "Informal Work",
         householdIncome: "₱12,000",
         economicClassification: "Indigent / In Crisis",
@@ -254,6 +255,7 @@ export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: Fro
         approvingOffice: "MSWD Calabanga",
         remarks: row.assessment_notes || "Documented and verified under municipal AICS crisis program.",
         householdMembers: [],
+        ...mapReviewProfileFields(row),
       },
     };
   }, []);
@@ -308,6 +310,11 @@ export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: Fro
       setCorrectedDocuments([]);
       setReviewNotes("");
       setSelectedProfile(latest);
+      if (isSecretary && latest.rawDbRow?.status === 'RETURNED_FOR_CORRECTION') {
+        setReturnedIntakeRecord(latest.rawDbRow);
+        setIsNewBeneficiaryModalOpen(true);
+        return;
+      }
       setIsAddMode(false);
       setProfilingEditModalOpen(true);
     } catch (error: any) {
@@ -351,7 +358,7 @@ export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: Fro
       toast.success("Profile saved successfully.");
       setProfilingEditModalOpen(false);
     } catch (error: any) {
-      toast.error(error.message || "Could not save the beneficiary profile.");
+      toast.error(error.message || "Could not save the beneficiary profile.", { id: "document-resubmission" });
     } finally {
       profileSaveInFlight.current = false;
       setProfileSaving(false);
@@ -407,8 +414,7 @@ export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: Fro
       const matchesStatusConstraint = isPendingOrUnderReview(record.status, record.rawDbRow?.status);
       if (!matchesStatusConstraint) return false;
 
-      const recordBarangayClean = (record.barangay || "").replace(/^(brgy\.?|barangay)\s*/i, "").trim().toLowerCase();
-      if (!secretaryBarangayClean || recordBarangayClean !== secretaryBarangayClean) return false;
+      // The API scopes results to the assigned barangay or this user's own submissions.
     }
 
     if (record.trackingId === newlyRegisteredId) return true;
@@ -520,11 +526,11 @@ export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: Fro
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Age</label>
-                      <input type="number" disabled readOnly defaultValue={selectedProfile.fullInfo.age} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="number" disabled readOnly value={selectedProfile.fullInfo.age} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Place of Birth</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.birthPlace} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.birthPlace} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
 
                     <div>
@@ -551,16 +557,16 @@ export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: Fro
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Nationality</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.nationality} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.nationality} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Religion</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.religion} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.religion} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
 
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Highest Educational Attainment</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.highestEducationalAttainment} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.highestEducationalAttainment} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                   </div>
                 </section>
@@ -575,21 +581,21 @@ export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: Fro
                     </div>
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Email</label>
-                      <input type="email" disabled readOnly defaultValue={selectedProfile.fullInfo.email} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="email" disabled readOnly value={selectedProfile.fullInfo.email} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
 
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Barangay</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.barangay} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.barangay} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Purok / Zone</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.purokZone} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.purokZone} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
 
                     <div className="md:col-span-4">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Street Address</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.streetAddress} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.streetAddress} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                   </div>
                 </section>
@@ -600,11 +606,11 @@ export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: Fro
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-sm">
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Employment Status</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.employmentStatus} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.employmentStatus} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Monthly Personal Income</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.monthlyPersonalIncome} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.monthlyPersonalIncome} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                   </div>
                 </section>
@@ -615,27 +621,27 @@ export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: Fro
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-sm">
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">4Ps Beneficiary Status</label>
-                      <select disabled defaultValue={selectedProfile.fullInfo.is4Ps ? "Yes" : "No"} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
+                      <select disabled value={selectedProfile.fullInfo.is4Ps ? "Yes" : "No"} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
                         <option value="Yes">Yes</option>
                         <option value="No">No</option>
                       </select>
                     </div>
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">4Ps Household ID Number</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.fourPsId} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.fourPsId} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                     <div></div> {/* Spacer */}
 
                     <div>
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">Indigenous Person (IP) Status</label>
-                      <select disabled defaultValue={selectedProfile.fullInfo.isIP ? "Yes" : "No"} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
+                      <select disabled value={selectedProfile.fullInfo.isIP ? "Yes" : "No"} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed">
                         <option value="Yes">Yes</option>
                         <option value="No">No</option>
                       </select>
                     </div>
                     <div className="md:col-span-2">
                       <label className="text-xs font-semibold text-gray-600 uppercase block mb-1">IP Tribe / Affiliation</label>
-                      <input type="text" disabled readOnly defaultValue={selectedProfile.fullInfo.ipTribe} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
+                      <input type="text" disabled readOnly value={selectedProfile.fullInfo.ipTribe} className="w-full px-3 py-2 border rounded-lg bg-gray-100 text-gray-700 cursor-not-allowed" />
                     </div>
                   </div>
                 </section>
@@ -1026,7 +1032,8 @@ export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: Fro
       {/* New AICS Beneficiary Registration Modal */}
       <NewAicsModal
         isOpen={isNewBeneficiaryModalOpen}
-        onClose={() => setIsNewBeneficiaryModalOpen(false)}
+        onClose={() => { setIsNewBeneficiaryModalOpen(false); setReturnedIntakeRecord(null); }}
+        returnedRecord={returnedIntakeRecord}
         onSuccess={(createdRecord) => {
           ++caseLoadRequest.current;
           const record = mapDbRowToAicsRecord(createdRecord);

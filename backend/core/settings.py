@@ -126,7 +126,7 @@ APPEND_SLASH = False
 
 # Django REST Framework Configuration
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': ['rest_framework.authentication.SessionAuthentication'],
+    'DEFAULT_AUTHENTICATION_CLASSES': ['api.session_auth.TabSessionAuthentication'],
     'EXCEPTION_HANDLER': 'api.exceptions.api_exception_handler',
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',

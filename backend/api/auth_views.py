@@ -7,6 +7,7 @@ from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
 from .permissions import account, role
+from .session_auth import session_store, tab_session_token
 
 
 def identity(user):
@@ -28,6 +29,7 @@ class SessionView(APIView):
 
 @method_decorator(csrf_protect, name='dispatch')
 class LoginView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [LoginThrottle]
 
@@ -40,8 +42,10 @@ class LoginView(APIView):
         user = authenticate(request, username=username.strip(), password=password)
         if not user or not role(user) or role(user) != request.data.get('role'):
             return Response({'error': 'Invalid credentials for the selected role.'}, status=400)
+        request._request.session = session_store()
         login(request, user)
-        return Response({'account': identity(user)}, headers={'Cache-Control': 'no-store'})
+        token = tab_session_token(request)
+        return Response({'account': identity(user), 'sessionToken': token}, headers={'Cache-Control': 'no-store'})
 
 
 class LogoutView(APIView):

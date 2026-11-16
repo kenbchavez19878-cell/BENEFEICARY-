@@ -43,6 +43,15 @@ class UploadMetadataSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255)
 
 
+def required_replacements(case):
+    workflow = case.workflow_data if isinstance(case.workflow_data, dict) else {}
+    explicit = workflow.get('requiredDocumentReplacements')
+    if isinstance(explicit, list):
+        return set(explicit)
+    statuses = case.documents_status if isinstance(case.documents_status, dict) else {}
+    return {key for key, status in statuses.items() if status == 'Invalid'}
+
+
 class CaseDocumentsMixin(serializers.Serializer):
     documents = serializers.SerializerMethodField()
     correction_notes = serializers.SerializerMethodField()
@@ -77,7 +86,7 @@ class CaseDocumentsMixin(serializers.Serializer):
             header = file.read(16)
             file.seek(0)
             if not file_type or not file_type[1](header):
-                raise serializers.ValidationError({'uploaded_files': 'Only PDF, JPEG, PNG and WebP documents are accepted.'})
+                raise serializers.ValidationError({'uploaded_files': 'Only PDF, JPEG and PNG documents are accepted.'})
             if file.size > MAX_DOCUMENT_SIZE:
                 raise serializers.ValidationError({'uploaded_files': 'Each document must be 10 MB or smaller.'})
         if self.instance is not None and self.instance.status == 'RETURNED_FOR_CORRECTION':
@@ -86,11 +95,13 @@ class CaseDocumentsMixin(serializers.Serializer):
                 raise serializers.ValidationError({'documents_status': 'Stored document decisions must be an object.'})
             if attrs.get('status') == 'BARANGAY_ENDORSED':
                 supplied = {item['id'] for item in metadata}
-                rejected = [doc.name for doc in self.instance.attachments.all()
-                            if statuses.get(doc.requirement_id) in ('Invalid', 'Incomplete') and doc.requirement_id not in supplied]
-                if rejected:
-                    raise serializers.ValidationError({'uploaded_files': 'Replace the rejected/incomplete documents before resubmitting: ' + ', '.join(rejected)})
+                missing = required_replacements(self.instance) - supplied
+                if missing:
+                    names = {doc.requirement_id: doc.name for doc in self.instance.attachments.all()}
+                    raise serializers.ValidationError({'uploaded_files': 'Upload the explicitly required replacements before resubmitting: ' + ', '.join(names.get(key, key) for key in sorted(missing))})
             if files:
+                workflow = attrs.setdefault('workflow_data', dict(self.instance.workflow_data or {}))
+                workflow['requiredDocumentReplacements'] = sorted(required_replacements(self.instance) - {item['id'] for item in metadata})
                 attrs['documents_status'] = {key: value for key, value in statuses.items() if key not in {item['id'] for item in metadata}}
         return attrs
 
@@ -180,10 +191,11 @@ class CaseDocumentsMixin(serializers.Serializer):
             {
                 'id': doc.requirement_id,
                 'name': doc.name,
-                'fileRef': doc.original_name,
+                'fileRef': doc.original_name or Path(doc.file.name).name,
                 'fileUrl': f'/api/documents/{doc.pk}/file',
                 'status': statuses.get(doc.requirement_id, 'Incomplete'),
                 'reviewed': doc.requirement_id in statuses,
+                'replacementRequired': obj.status == 'RETURNED_FOR_CORRECTION' and doc.requirement_id in required_replacements(obj),
             }
             for doc in obj.attachments.all()
         ]

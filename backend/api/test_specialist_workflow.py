@@ -44,3 +44,58 @@ class SpecialistWorkflowTests(TestCase):
             self.assertEqual(resubmitted.status_code, 200, resubmitted.data)
             self.assertEqual(client.get(f'/api/cases/{module}').data['data'][0]['status'], 'BARANGAY_ENDORSED')
             self.assertEqual(client.get('/api/dashboard/stats').data['data']['totalBeneficiaries'], 1)
+
+    def test_session_authenticated_staff_can_acknowledge_and_advance(self):
+        import json
+        import tempfile
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test import override_settings
+        from .models import ApplicationAccount
+
+        for module, username, password, stored_role, stored_module in (
+            ('aics', 'staff_aics', 'Staff_AICS@2026!', ' Staff ', ' AICS '),
+            ('women-solo-parent', 'staff_women_solo', 'Staff_Women@2026!', 'MSWD Staff', 'WOMEN_SOLO_PARENT'),
+        ):
+            profile = ApplicationAccount.objects.get(user__username=username)
+            profile.role, profile.case_module = stored_role, stored_module
+            profile.save(update_fields=['role', 'case_module'])
+            client = APIClient(enforce_csrf_checks=True)
+            client.get('/api/auth/session')
+            logged_in = client.post('/api/auth/login', {'username': username, 'password': password, 'role': 'Staff'},
+                                   format='json', HTTP_X_CSRFTOKEN=client.cookies['csrftoken'].value)
+            self.assertEqual(logged_in.status_code, 200, logged_in.data)
+            csrf = {'HTTP_X_CSRFTOKEN': client.cookies['csrftoken'].value}
+            with tempfile.TemporaryDirectory() as media, override_settings(MEDIA_ROOT=media):
+                created = client.post(f'/api/cases/{module}', {
+                    'payload': json.dumps({**intake_payload(module), 'document_metadata': [{'id': 'identity', 'name': 'Verification'}]}),
+                    'uploaded_files': SimpleUploadedFile('verification.pdf', b'%PDF-1.7\nverification'),
+                }, format='multipart', **csrf)
+                self.assertEqual(created.status_code, 201, created.data)
+                record = created.data['data']
+                endpoint = f'/api/cases/{module}/{record["id"]}/step'
+                acknowledged = client.patch(endpoint, {'status': 'UNDER_REVIEW'}, format='json', **csrf)
+                self.assertEqual(acknowledged.status_code, 200, acknowledged.data)
+                advanced = client.patch(f'/api/cases/{record["tracking_id"]}/step', {
+                    'moduleType': module, 'status': 'IN_ASSESSMENT', 'documents_status': {'identity': 'Valid'},
+                }, format='json', **csrf)
+                self.assertEqual(advanced.status_code, 200, advanced.data)
+                other = 'aics' if module != 'aics' else 'women-solo-parent'
+                self.assertEqual(client.patch(f'/api/cases/{other}/1/step', {'status': 'UNDER_REVIEW'}, format='json', **csrf).status_code, 403)
+            client.post('/api/auth/logout', **csrf)
+            self.assertEqual(client.patch(endpoint, {'status': 'UNDER_REVIEW'}, format='json').status_code, 403)
+
+    def test_women_staff_acknowledgement_all_routes_and_methods(self):
+        staff = self.client_for('staff_women_solo')
+        secretary = self.client_for('barangaysecretary')
+        for method, generic in (('patch', False), ('post', False), ('patch', True)):
+            created = secretary.post('/api/cases/women-solo-parent', intake_payload('women-solo-parent', barangay='San Vicente'), format='json')
+            self.assertEqual(created.status_code, 201, created.data)
+            record = created.data['data']
+            endpoint = (f'/api/cases/{record["tracking_id"]}/step' if generic
+                        else f'/api/cases/women-solo-parent/{record["id"]}/step')
+            denied = secretary.patch(endpoint, {'status': 'UNDER_REVIEW', 'moduleType': 'solo-parent'}, format='json')
+            self.assertEqual(denied.status_code, 403)
+            self.assertIn('BarangaySecretary', str(denied.data['detail']))
+            response = getattr(staff, method)(endpoint, {'status': 'UNDER_REVIEW', 'moduleType': 'solo-parent'}, format='json')
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual(response.data['data']['status'], 'UNDER_REVIEW')

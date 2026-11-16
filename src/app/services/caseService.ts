@@ -10,12 +10,13 @@ export interface IntakeDocument {
 
 // Let the browser set the multipart boundary; File objects cannot be JSON encoded.
 function intakeRequest(data: object, documents: IntakeDocument[] = []): RequestInit {
+  const replacements = documents.filter(document => document.file instanceof File);
   const body = new FormData();
   body.append('payload', JSON.stringify({
     ...data,
-    document_metadata: documents.map(({ id, name }) => ({ id, name })),
+    document_metadata: replacements.map(({ id, name }) => ({ id, name })),
   }));
-  documents.forEach(({ file }) => body.append('uploaded_files', file, file.name));
+  replacements.forEach(({ file }) => body.append('uploaded_files', file, file.name));
   return { method: 'POST', body };
 }
 
@@ -114,9 +115,9 @@ export function mapDbRecordToCaseData(row: DbCaseRecord | null | undefined, modu
   else if (safeRow.aics_type === 'BALIK_PROBINSYA') crisis = 'Balik Probinsya';
 
   const amount = Number(safeRow.financial_aid_amount ?? safeRow.approved_amount ?? 0);
-  const trackingNumber = safeRow.case_number || `BEN-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+  const trackingNumber = safeRow.case_number || safeRow.tracking_id || safeRow.trackingId || (safeRow.id != null ? String(safeRow.id) : "");
   const beneficiaryName = safeRow.beneficiary_name || safeRow.fullName || "Beneficiary Client";
-  const barangayName = safeRow.barangay_name || safeRow.barangay || "San Juan";
+  const barangayName = safeRow.barangay_name ?? safeRow.barangay ?? "";
 
   const rawStatus = (safeRow.status || 'BARANGAY_ENDORSED').toString().toUpperCase().replace(/\s+/g, '_');
   const validStatuses: WorkflowStatusCode[] = [
@@ -158,7 +159,7 @@ export function mapDbRecordToCaseData(row: DbCaseRecord | null | undefined, modu
     correctionNotes: getCorrectionNotes(safeRow),
     documents,
     socialAssessment: {
-      intakeNotes: workflow.socialAssessment?.intakeNotes ?? workflow.intakeInterview?.notes ?? "",
+      intakeNotes: workflow.socialAssessment?.intakeNotes ?? workflow.intakeInterview?.notes ?? safeRow.intake_notes ?? safeRow.assessment_notes ?? "",
       caseStudySummary: workflow.socialAssessment?.caseStudySummary ?? "",
       vulnerabilityLevel: workflow.socialAssessment?.vulnerabilityLevel ?? vuln,
       vulnerabilityNotes: workflow.socialAssessment?.vulnerabilityNotes ?? "",
@@ -172,10 +173,10 @@ export function mapDbRecordToCaseData(row: DbCaseRecord | null | undefined, modu
     servicePlan: {
       spicNumber: safeRow.spic_number ?? '',
       purchaseBookletNumber: safeRow.booklet_number ?? '',
-      emergencyCashAidAmount: Number(workflow.servicePlan?.emergencyCashAidAmount ?? amount),
+      emergencyCashAidAmount: Number(safeRow.financial_aid_amount ?? workflow.servicePlan?.emergencyCashAidAmount ?? amount),
       referrals: Array.isArray(safeRow.referrals) ? safeRow.referrals : (workflow.servicePlan?.referrals || []),
       crisisType: crisis,
-      approvedFinancialAmount: Number(workflow.servicePlan?.approvedFinancialAmount ?? amount),
+      approvedFinancialAmount: Number(safeRow.approved_amount ?? workflow.servicePlan?.approvedFinancialAmount ?? amount),
       nonMonetarySupport: workflow.servicePlan?.nonMonetarySupport ?? "",
     },
     serviceRelease: {
@@ -374,7 +375,14 @@ export async function apiCreateAicsCase(data: {
   return (json.data || json) as DbCaseRecord;
 }
 
+export type DashboardPeriod = 'all' | 'month' | 'year';
+export interface DashboardFilters {
+  period?: DashboardPeriod;
+  barangay?: string;
+}
 export interface DashboardStats {
+  filteredRecords?: Array<{ id: string; name: string; barangay: string; program: string; status: string; module: string }>;
+  matchedRecords?: number;
   totalBeneficiaries: number;
   activeCases: number;
   approvedReleasedCases: number;
@@ -400,8 +408,11 @@ export interface DashboardStats {
 }
 
 // 7. Get Live Dashboard Statistics (GET /api/dashboard/stats)
-export async function apiGetDashboardStats(): Promise<DashboardStats> {
-  const res = await authFetch('/api/dashboard/stats');
+export async function apiGetDashboardStats(filters: DashboardFilters = {}, signal?: AbortSignal): Promise<DashboardStats> {
+  const query = new URLSearchParams();
+  if (filters.period) query.set('period', filters.period);
+  if (filters.barangay) query.set('barangay', filters.barangay);
+  const res = await authFetch(`/api/dashboard/stats${query.size ? `?${query}` : ''}`, { cache: 'no-store', signal });
   if (!res.ok) {
     throw new Error(`Failed to load dashboard statistics: ${res.statusText}`);
   }
@@ -467,7 +478,7 @@ export function subscribeDataUpdated(callback: () => void | Promise<void>) {
   };
 }
 
-export async function apiResubmitReturnedCase(id: string | number, names: SeparatedNameFields & { birthDate?: string; gender?: string; civilStatus?: string; contactNumber?: string }, module: 'women-solo-parent' | 'aics', version?: number, documents: IntakeDocument[] = []) {
+export async function apiResubmitReturnedCase(id: string | number, names: SeparatedNameFields & { birthDate?: string; gender?: string; civilStatus?: string; contactNumber?: string } & Record<string, unknown>, module: 'women-solo-parent' | 'aics', version?: number, documents: IntakeDocument[] = []) {
   return apiUpdateCaseStep(id, {
     ...names, ...mapNameFields(names), status: 'BARANGAY_ENDORSED', expected_version: version,
     moduleType: module === 'aics' ? 'aics' : 'solo-parent',

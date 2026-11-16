@@ -55,6 +55,12 @@ class CaseIntakeMixin:
                 }
                 data[field] = aliases.get(value, value)
         result = super().to_internal_value(data)
+        if 'applicantNotes' in data:
+            if self.instance is None or self.instance.status != 'RETURNED_FOR_CORRECTION':
+                raise serializers.ValidationError({'applicantNotes': 'Applicant notes can be corrected only on returned records.'})
+            if not isinstance(data['applicantNotes'], str) or len(data['applicantNotes']) > 4000:
+                raise serializers.ValidationError({'applicantNotes': 'Enter text up to 4000 characters.'})
+            result['intake_notes'] = data['applicantNotes'].strip()
         if isinstance(plan, dict):
             for nested, field in plan_fields.items():
                 if nested not in plan or field not in result:
@@ -78,6 +84,17 @@ class CaseIntakeMixin:
                 raise serializers.ValidationError({'closureNotes': 'Expected text.'})
             workflow['closureNotes'] = data['closureNotes'].strip()
             changed = True
+        if 'requiredDocumentReplacements' in data:
+            required = data['requiredDocumentReplacements']
+            if not isinstance(required, list) or len(required) > 20 or any(not isinstance(key, str) or not key.strip() or len(key) > 80 for key in required):
+                raise serializers.ValidationError({'requiredDocumentReplacements': 'Supply a list of document requirement IDs.'})
+            if data.get('status') != 'RETURNED_FOR_CORRECTION':
+                raise serializers.ValidationError({'requiredDocumentReplacements': 'Set replacement requirements when returning a case for correction.'})
+            available = {document.requirement_id for document in self.instance.attachments.all()} if self.instance else set()
+            if any(key.strip() not in available for key in required):
+                raise serializers.ValidationError({'requiredDocumentReplacements': 'Select an attached document for replacement.'})
+            workflow['requiredDocumentReplacements'] = list(dict.fromkeys(key.strip() for key in required))
+            changed = True
         if 'correctionNotes' in data:
             if not isinstance(data['correctionNotes'], str):
                 raise serializers.ValidationError({'correctionNotes': 'Expected text.'})
@@ -87,7 +104,7 @@ class CaseIntakeMixin:
             changed = True
         if changed:
             result['workflow_data'] = workflow
-        result['_workflow_sections'] = {field for field in ('intakeInterview', 'socialAssessment', 'eligibilityDetails', 'servicePlan', 'serviceRelease', 'closureNotes', 'correctionNotes') if field in data}
+        result['_workflow_sections'] = {field for field in ('intakeInterview', 'socialAssessment', 'eligibilityDetails', 'servicePlan', 'serviceRelease', 'closureNotes', 'correctionNotes', 'requiredDocumentReplacements') if field in data}
         result['_expected_version'] = data.get('expected_version')
         return result
 
@@ -109,6 +126,8 @@ class CaseIntakeMixin:
             if field in attrs:
                 attrs[field] = (attrs[field] or '').strip()
         if is_new:
+            amount_field = 'approved_amount' if self.Meta.model.__name__ == 'AicsCase' else 'financial_aid_amount'
+            attrs.setdefault(amount_field, self.Meta.model._meta.get_field(amount_field).get_default())
             attrs['intake_notes'] = attrs.get('assessment_notes') or ''
             for field in ('first_name', 'last_name', 'birth_date', 'gender', 'civil_status', 'barangay_name'):
                 require(field)

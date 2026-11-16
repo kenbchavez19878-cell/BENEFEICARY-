@@ -47,3 +47,61 @@ class InitialIntakePermissionTests(TestCase):
             own = self.client_for(username).post(f'/api/cases/{module}', payload, format='json')
             self.assertEqual(own.status_code, 201, own.data)
             self.assertEqual(self.client_for(other).post(f'/api/cases/{module}', payload, format='json').status_code, 403)
+
+    def test_secretary_selected_barangay_is_saved_and_remains_accessible(self):
+        from .models import AicsCase, WomenAndSoloParentCase
+        secretary = self.client_for('barangaysecretary')
+        for module, model in (('aics', AicsCase), ('women-solo-parent', WomenAndSoloParentCase)):
+            for multipart in (False, True):
+                data = intake_payload(module, barangay='Punta Tarawal')
+                response = secretary.post(f'/api/cases/{module}', {'payload': json.dumps(data)} if multipart else data,
+                                          format='multipart' if multipart else 'json')
+                self.assertEqual(response.status_code, 201, response.data)
+                record = model.objects.get(pk=response.data['data']['id'])
+                self.assertEqual(record.barangay_name, 'Punta Tarawal')
+                self.assertEqual(record.submitted_by.username, 'barangaysecretary')
+                queue = secretary.get(f'/api/cases/{module}', {'queue': 'secretary', 'barangay': 'San Vicente'})
+                self.assertIn(record.pk, [row['id'] for row in queue.data['data']])
+                detail = secretary.get(f'/api/cases/{record.tracking_id}')
+                self.assertEqual(detail.status_code, 200, detail.data)
+                changed = secretary.patch(f'/api/cases/{module}/{record.pk}/step', {'barangay': 'Quipayo'}, format='json')
+                self.assertEqual(changed.status_code, 200, changed.data)
+                record.refresh_from_db()
+                self.assertEqual(record.barangay_name, 'Quipayo')
+            other = model.objects.create(first_name='Other', last_name='Applicant', barangay_name='Punta Tarawal')
+            self.assertEqual(secretary.get(f'/api/cases/{other.tracking_id}').status_code, 404)
+
+    def test_new_intake_defaults_to_1000_and_preserves_explicit_amounts(self):
+        from .testing import api_test_client
+        client = api_test_client()
+        for module, field, alias in (
+            ('aics', 'approved_amount', 'requestedAmount'),
+            ('women-solo-parent', 'financial_aid_amount', 'financialAidAmount'),
+        ):
+            for amount in (None, 3000):
+                payload = intake_payload(module)
+                payload.pop(alias, None)
+                if amount is not None:
+                    payload[alias] = amount
+                created = client.post(f'/api/cases/{module}', payload, format='json')
+                self.assertEqual(created.status_code, 201, created.data)
+                record = created.data['data']
+                expected = 1000 if amount is None else amount
+                self.assertEqual(float(record[field]), expected)
+                saved = client.patch(f'/api/cases/{module}/{record["id"]}', {'firstName': 'Updated'}, format='json')
+                self.assertEqual(saved.status_code, 200, saved.data)
+                self.assertEqual(float(saved.data.get('data', saved.data)[field]), expected)
+
+    def test_default_does_not_replace_existing_zero_amount(self):
+        from .models import AicsCase, WomenAndSoloParentCase
+        from .testing import api_test_client
+        client = api_test_client()
+        for module, model, field in (
+            ('aics', AicsCase, 'approved_amount'),
+            ('women-solo-parent', WomenAndSoloParentCase, 'financial_aid_amount'),
+        ):
+            case = model.objects.create(first_name='Existing', last_name='Applicant', **{field: 0})
+            response = client.patch(f'/api/cases/{module}/{case.pk}', {'firstName': 'Updated'}, format='json')
+            self.assertEqual(response.status_code, 200, response.data)
+            case.refresh_from_db()
+            self.assertEqual(getattr(case, field), 0)

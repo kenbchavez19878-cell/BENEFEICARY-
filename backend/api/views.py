@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+from django.utils import timezone as django_timezone
 from decimal import Decimal
 import re
 import json
@@ -123,12 +125,15 @@ def filter_secretary_queue(queryset, request):
     return queryset.annotate(_queue_barangay=Trim('barangay_name')).filter(status__in=(
         CaseStatus.BARANGAY_ENDORSED, CaseStatus.UNDER_REVIEW, CaseStatus.RETURNED_FOR_CORRECTION,
     )).filter(
-        Q(_queue_barangay__iexact=barangay) | Q(_queue_barangay__iexact=f'Brgy. {barangay}')
+        Q(submitted_by=request.user) | Q(_queue_barangay__iexact=barangay) | Q(_queue_barangay__iexact=f'Brgy. {barangay}')
         | Q(_queue_barangay__iexact=f'Brgy {barangay}') | Q(_queue_barangay__iexact=f'Barangay {barangay}')
     )
 
 
 class LockedCaseWrites:
+    def perform_create(self, serializer):
+        serializer.save(submitted_by=self.request.user)
+
     @transaction.atomic
     def update(self, request, *args, **kwargs):
         return super().update(request, *args, **kwargs)
@@ -225,7 +230,7 @@ class WomenAndSoloParentCaseViewSet(LockedCaseWrites, viewsets.ModelViewSet):
             'audit_logs': instance.monitoring_logs or [],
         })
 
-    @action(detail=True, methods=['patch', 'post'], url_path='step')
+    @action(detail=True, methods=['patch', 'post'], url_path='step', permission_classes=[CaseAccess])
     @transaction.atomic
     def update_step(self, request, pk=None):
         instance = self.get_object()
@@ -345,7 +350,7 @@ class AicsCaseViewSet(LockedCaseWrites, viewsets.ModelViewSet):
             'audit_logs': instance.monitoring_logs or [],
         })
 
-    @action(detail=True, methods=['patch', 'post'], url_path='step')
+    @action(detail=True, methods=['patch', 'post'], url_path='step', permission_classes=[CaseAccess])
     @transaction.atomic
     def update_step(self, request, pk=None):
         instance = self.get_object()
@@ -420,7 +425,7 @@ class UniversalCaseDetailView(APIView):
             }, status=status.HTTP_404_NOT_FOUND)
 
         self.check_object_permissions(request, instance)
-        serializer = ser_class(instance)
+        serializer = ser_class(instance, context={'request': request})
         return Response({
             'success': True,
             'module': mod_name,
@@ -481,9 +486,43 @@ class DashboardStatsView(APIView):
     GET /api/dashboard/stats/
     """
     def get(self, request, format=None):
-        women_cases = list(scope_cases(WomenAndSoloParentCase.objects.all(), request.user))
-        aics_cases = list(scope_cases(AicsCase.objects.all(), request.user))
+        period = request.query_params.get('period', 'all')
+        if period not in {'all', 'month', 'year'}:
+            raise ValidationError({'period': 'Select all, month, or year.'})
+        selected_barangay = request.query_params.get('barangay', '').strip()
+        def normalize(value):
+            return (re.sub(r'^(brgy\.?|barangay)\s+', '', str(value or '').strip(), flags=re.I).strip() or 'Not recorded').casefold()
+        now = django_timezone.now().astimezone(ZoneInfo('Asia/Manila'))
+        start = end = None
+        if period == 'month':
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            end = start.replace(year=start.year + 1, month=1) if start.month == 12 else start.replace(month=start.month + 1)
+        elif period == 'year':
+            start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            end = start.replace(year=start.year + 1)
+
+        def cases_for(model):
+            queryset = scope_cases(model.objects.all(), request.user)
+            if start is not None:
+                queryset = queryset.filter(created_at__gte=start, created_at__lt=end)
+            return list(queryset)
+
+        women_cases = cases_for(WomenAndSoloParentCase)
+        aics_cases = cases_for(AicsCase)
+        # Keep the date-scoped barangay list available when drilling into one community.
+        distribution_cases = women_cases + aics_cases
+        if selected_barangay:
+            women_cases = [case for case in women_cases if normalize(case.barangay_name) == normalize(selected_barangay)]
+            aics_cases = [case for case in aics_cases if normalize(case.barangay_name) == normalize(selected_barangay)]
         all_cases = women_cases + aics_cases
+        filtered_records = [{
+            'id': case.case_number or case.tracking_id,
+            'name': case.beneficiary_name,
+            'barangay': case.barangay_name,
+            'program': case.get_category_display() if hasattr(case, 'category') else f'AICS - {case.get_aics_type_display()}',
+            'status': case.get_status_display(),
+            'module': 'women-solo-parent' if hasattr(case, 'category') else 'aics',
+        } for case in sorted(all_cases, key=lambda case: (case.created_at.timestamp() if case.created_at else float('-inf'), case.pk), reverse=True)[:100]] if selected_barangay else []
 
         total_beneficiaries = len(all_cases)
 
@@ -522,13 +561,15 @@ class DashboardStatsView(APIView):
                 aics_counts['MEDICAL'] += 1
 
         # Barangay Distribution
-        brgy_counts = {}
-        for c in all_cases:
-            b = c.barangay_name or 'Poblacion'
-            brgy_counts[b] = brgy_counts.get(b, 0) + 1
+        brgy_counts, brgy_labels = {}, {}
+        for c in distribution_cases:
+            label = re.sub(r'^(brgy\.?|barangay)\s+', '', str(c.barangay_name or 'Not recorded').strip(), flags=re.I).strip() or 'Not recorded'
+            key = normalize(label)
+            brgy_labels.setdefault(key, label)
+            brgy_counts[key] = brgy_counts.get(key, 0) + 1
         barangay_distribution = [
-            {'barangay': b, 'count': cnt}
-            for b, cnt in sorted(brgy_counts.items(), key=lambda item: item[1], reverse=True)
+            {'barangay': brgy_labels[key], 'count': count}
+            for key, count in sorted(brgy_counts.items(), key=lambda item: (-item[1], item[0]))
         ]
 
         # Recent Activities Feed
@@ -586,8 +627,11 @@ class DashboardStatsView(APIView):
                 ],
                 'barangayDistribution': barangay_distribution,
                 'recentActivities': capped_activities,
+                'filteredRecords': filtered_records,
+                'matchedRecords': total_beneficiaries,
+                'filters': {'period': period, 'barangay': selected_barangay, 'dateBasis': 'created_at', 'timezone': 'Asia/Manila'},
             }
-        }, status=status.HTTP_200_OK)
+        }, status=status.HTTP_200_OK, headers={'Cache-Control': 'private, no-store', 'Vary': 'Cookie, X-Benefitrack-Session'})
 
 
 class HealthCheckView(APIView):

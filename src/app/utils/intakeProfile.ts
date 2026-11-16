@@ -52,17 +52,21 @@ export function mapIntakeProfile(row: Record<string, any>): IntakeProfile {
     serviceProvider: row.service_provider ?? row.serviceProvider ?? "",
   };
 }
-import { getBarangayById } from "../data/barangayAccounts";
-import { CALABANGA_BARANGAYS } from "../data/calabangaBarangays";
-
 export function defaultIntakeBarangay(): string {
-  if (typeof window !== 'undefined') {
-    const role = sessionStorage.getItem('benefitrack_active_role');
-    if (role === 'BarangaySecretary' || role === 'BarangayRegistrar') {
-      const account = getBarangayById(sessionStorage.getItem('benefitrack_account_id') || '');
-      if (account) return account.assignedBarangay.replace(/^(brgy\.?|barangay)\s+/i, '').trim();
-    }
-  }
-  return CALABANGA_BARANGAYS[0];
+  return "";
 }
 
+export function mapReviewProfileFields(row: Record<string, any>) {
+  const profile = mapIntakeProfile(row);
+  const label = (value: string) => value.toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, character => character.toUpperCase());
+  return {
+    ...mapNameFields(row),
+    birthdate: profile.birthDate,
+    age: ageFromBirthDate(profile.birthDate),
+    sexAtBirth: label(profile.gender),
+    civilStatus: label(profile.civilStatus),
+    contactNumber: profile.contactNumber,
+    barangay: row.barangay_name ?? row.barangay ?? '',
+    remarks: row.intake_notes || row.assessment_notes || profile.crisisSummary || '',
+  };
+}

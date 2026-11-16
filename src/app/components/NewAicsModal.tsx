@@ -7,12 +7,13 @@ import { toast } from "sonner";
 import { IntakeDocumentUploads, aicsRequirements } from "./IntakeDocumentUploads";
 import { getIntakeFileError } from "../utils/intakeFileValidation";
 import type { IntakeDocument, DbCaseRecord } from "../services/caseService";
-import { apiCreateAicsCase, saveSecretarySubmittedCase } from "../services/caseService";
+import { apiCreateAicsCase, saveSecretarySubmittedCase, apiResubmitReturnedCase } from "../services/caseService";
 
 interface NewAicsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (record: DbCaseRecord) => void;
+  returnedRecord?: DbCaseRecord | null;
 }
 
 
@@ -23,14 +24,14 @@ const CRISIS_TYPES: Array<{
   color: string;
   defaultAmount: number;
 }> = [
-  { id: "MEDICAL", label: "Medical Assistance", icon: Stethoscope, color: "text-blue-600 bg-blue-50 border-blue-200", defaultAmount: 5000 },
-  { id: "BURIAL", label: "Burial Assistance", icon: Cross, color: "text-amber-600 bg-amber-50 border-amber-200", defaultAmount: 5000 },
-  { id: "TRANSPORTATION", label: "Transportation Aid", icon: Bus, color: "text-emerald-600 bg-emerald-50 border-emerald-200", defaultAmount: 2500 },
-  { id: "ECONOMIC_RELIEF", label: "Economic Relief", icon: DollarSign, color: "text-indigo-600 bg-indigo-50 border-indigo-200", defaultAmount: 3000 },
-  { id: "BALIK_PROBINSYA", label: "Balik Probinsya", icon: MapPin, color: "text-violet-600 bg-violet-50 border-violet-200", defaultAmount: 6000 },
+  { id: "MEDICAL", label: "Medical Assistance", icon: Stethoscope, color: "text-blue-600 bg-blue-50 border-blue-200", defaultAmount: 1000 },
+  { id: "BURIAL", label: "Burial Assistance", icon: Cross, color: "text-amber-600 bg-amber-50 border-amber-200", defaultAmount: 1000 },
+  { id: "TRANSPORTATION", label: "Transportation Aid", icon: Bus, color: "text-emerald-600 bg-emerald-50 border-emerald-200", defaultAmount: 1000 },
+  { id: "ECONOMIC_RELIEF", label: "Economic Relief", icon: DollarSign, color: "text-indigo-600 bg-indigo-50 border-indigo-200", defaultAmount: 1000 },
+  { id: "BALIK_PROBINSYA", label: "Balik Probinsya", icon: MapPin, color: "text-violet-600 bg-violet-50 border-violet-200", defaultAmount: 1000 },
 ];
 
-export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) {
+export function NewAicsModal({ isOpen, onClose, onSuccess, returnedRecord }: NewAicsModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [documents, setDocuments] = useState<IntakeDocument[]>([]);
   const [trackingNumber, setTrackingNumber] = useState(() => `AICS-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`);
@@ -50,10 +51,11 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
   const [crisisType, setCrisisType] = useState<"MEDICAL" | "BURIAL" | "TRANSPORTATION" | "ECONOMIC_RELIEF" | "BALIK_PROBINSYA">("MEDICAL");
   const [crisisSummary, setCrisisSummary] = useState("");
   const [serviceProvider, setServiceProvider] = useState("");
-  const [requestedAmount, setRequestedAmount] = useState(5000);
+  const [requestedAmount, setRequestedAmount] = useState(1000);
   const [initialStatus, setInitialStatus] = useState<"BARANGAY_ENDORSED" | "UNDER_REVIEW">("BARANGAY_ENDORSED");
 
-  const requirements = aicsRequirements(crisisType);
+  const baseRequirements = aicsRequirements(crisisType);
+  const requirements = Array.from(new Map([...baseRequirements, ...(returnedRecord?.documents || []).map(doc => ({ id: doc.id, name: doc.name }))].map(item => [item.id, item])).values());
 
   useEffect(() => {
     if (isOpen) return;
@@ -62,9 +64,23 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
     setBirthDate(""); setContactNumber(""); setDocuments([]);
     setGender("FEMALE"); setBarangay(defaultIntakeBarangay()); setInitialStatus("BARANGAY_ENDORSED");
     setCivilStatus("SINGLE"); setIncomeStatus("Indigent / No Regular Income");
-    setCrisisType("MEDICAL"); setRequestedAmount(5000);
+    setCrisisType("MEDICAL"); setRequestedAmount(1000);
     setCrisisSummary(""); setServiceProvider("");
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !returnedRecord) return;
+    setTrackingNumber(returnedRecord.case_number);
+    setFirstName(returnedRecord.first_name || ''); setMiddleName(returnedRecord.middle_name || '');
+    setLastName(returnedRecord.last_name || ''); setExtensionName(returnedRecord.extension_name || '');
+    setBirthDate(returnedRecord.birth_date || ''); setGender(returnedRecord.gender || 'FEMALE');
+    setCivilStatus(returnedRecord.civil_status || 'SINGLE'); setBarangay(returnedRecord.barangay_name || '');
+    setContactNumber(returnedRecord.contact_number || ''); setInitialStatus('BARANGAY_ENDORSED');
+    setDocuments([]);
+    setIncomeStatus(returnedRecord.income_status || ''); setCrisisType(returnedRecord.aics_type || 'MEDICAL');
+    setCrisisSummary(returnedRecord.crisis_summary || ''); setServiceProvider(returnedRecord.service_provider || '');
+    setRequestedAmount(Number(returnedRecord.approved_amount ?? 1000));
+  }, [isOpen, returnedRecord]);
 
   if (!isOpen) return null;
 
@@ -98,7 +114,7 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
 
     try {
       setIsSubmitting(true);
-      const createdRecord = await apiCreateAicsCase({
+      const payload = {
         case_number: trackingNumber,
         firstName: firstName.trim(),
         middleName: middleName.trim(),
@@ -112,20 +128,23 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
         incomeStatus,
         crisisType,
         crisisSummary: crisisSummary.trim(),
-        serviceProvider: serviceProvider.trim() || undefined,
+        serviceProvider: serviceProvider.trim(),
         requestedAmount: Number(requestedAmount),
-        status: initialStatus,
-      }, selectedDocuments);
+        status: returnedRecord ? "BARANGAY_ENDORSED" : initialStatus,
+      };
+      const createdRecord = returnedRecord
+        ? await apiResubmitReturnedCase(returnedRecord.case_number, payload, 'aics', returnedRecord.workflow_version, selectedDocuments)
+        : await apiCreateAicsCase(payload, selectedDocuments);
 
       const assignedTracking = (createdRecord as any)?.tracking_id || createdRecord?.case_number || trackingNumber;
       saveSecretarySubmittedCase(assignedTracking);
-      toast.success(`AICS crisis intake registered successfully with Tracking ID: ${assignedTracking}`);
+      toast.success(returnedRecord ? `Corrections re-endorsed for MSWD review: ${assignedTracking}` : `AICS crisis intake registered successfully with Tracking ID: ${assignedTracking}`);
       setDocuments([]);
       onSuccess(createdRecord);
       onClose();
     } catch (err: any) {
       console.error("Error creating AICS case:", err);
-      toast.error(err.message || "Failed to register AICS intake record.");
+      toast.error(err.message || "Could not save the AICS intake record.", { id: returnedRecord ? "document-resubmission" : undefined });
     } finally {
       setIsSubmitting(false);
     }
@@ -148,10 +167,10 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
             </div>
             <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
               <HeartHandshake className="size-5 text-blue-300" />
-              New Beneficiary Registration (AICS)
+              {returnedRecord ? "Correct & Resubmit Applicant" : "New Beneficiary Registration (AICS)"}
             </h2>
             <p className="text-xs text-blue-200 mt-0.5">
-              Assistance to Individuals in Crisis Situations — MSWD Calabanga
+              {returnedRecord ? `MSWD correction instructions: ${returnedRecord.correction_notes || "Update the saved applicant information."}` : <>Assistance to Individuals in Crisis Situations — MSWD Calabanga</>}
             </p>
           </div>
           <button
@@ -305,7 +324,10 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
                   onChange={(e) => setCivilStatus(e.target.value)}
                   className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
                 >
+                  {civilStatus && !["SINGLE_PARENT", "ANNULLED", "SINGLE", "MARRIED", "WIDOWED", "SEPARATED", "COMMON_LAW"].includes(civilStatus) && <option value={civilStatus}>{civilStatus}</option>}
                   <option value="SINGLE">Single</option>
+                  <option value="SINGLE_PARENT">Single Parent</option>
+                  <option value="ANNULLED">Annulled</option>
                   <option value="MARRIED">Married</option>
                   <option value="WIDOWED">Widowed</option>
                   <option value="SEPARATED">Separated</option>
@@ -323,6 +345,7 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
                   onChange={(e) => setBarangay(e.target.value)}
                   className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
                 >
+                  <option value="" disabled>Select barangay</option>
                   {barangay && !CALABANGA_BARANGAYS.includes(barangay) && <option value={barangay}>Brgy. {barangay} (existing assignment)</option>}
                   {CALABANGA_BARANGAYS.map((b) => (
                     <option key={b} value={b}>
@@ -355,6 +378,7 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
                   onChange={(e) => setIncomeStatus(e.target.value)}
                   className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
                 >
+                  {incomeStatus && !["Indigent / No Regular Income", "Low Income / Minimum Wage", "In Crisis / Income Disrupted"].includes(incomeStatus) && <option value={incomeStatus}>{incomeStatus}</option>}
                   <option value="Indigent / No Regular Income">Indigent / No Regular Income (Priority 1)</option>
                   <option value="Low Income / Minimum Wage">Low Income / Minimum Wage (Priority 2)</option>
                   <option value="In Crisis / Income Disrupted">In Crisis / Income Disrupted due to Emergency</option>
@@ -403,9 +427,9 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
                 </label>
                 <input
                   type="number"
-                  min="500"
+                  min={returnedRecord ? 0 : 500}
                   max="100000"
-                  step="500"
+                  step={returnedRecord ? 1 : 500}
                   required
                   value={requestedAmount}
                   onChange={(e) => setRequestedAmount(Number(e.target.value))}
@@ -424,7 +448,7 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
                   className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white font-medium"
                 >
                   <option value="BARANGAY_ENDORSED">BARANGAY ENDORSED (Step 1 Awaiting Intake)</option>
-                  <option value="UNDER_REVIEW">UNDER REVIEW (Step 2 Verification In Progress)</option>
+                  <option value="UNDER_REVIEW" disabled={Boolean(returnedRecord)}>UNDER REVIEW (Step 2 Verification In Progress)</option>
                 </select>
               </div>
 
@@ -443,7 +467,7 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
             </div>
           </div>
           <IntakeDocumentUploads
-            requirements={requirements}
+            requirements={requirements} existingDocuments={returnedRecord?.documents || []}
             documents={documents}
             onChange={setDocuments}
             disabled={isSubmitting}
@@ -478,7 +502,7 @@ export function NewAicsModal({ isOpen, onClose, onSuccess }: NewAicsModalProps) 
               ) : (
                 <>
                   <CheckCircle2 className="size-4" />
-                  Save & Register Intake
+                  {returnedRecord ? "Save & Re-endorse Corrections" : "Save & Register Intake"}
                 </>
               )}
             </Button>

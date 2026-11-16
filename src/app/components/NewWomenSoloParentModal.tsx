@@ -7,12 +7,13 @@ import { toast } from "sonner";
 import { IntakeDocumentUploads, SOLO_PARENT_REQUIREMENTS, WOMEN_REQUIREMENTS } from "./IntakeDocumentUploads";
 import { getIntakeFileError } from "../utils/intakeFileValidation";
 import type { IntakeDocument, DbCaseRecord } from "../services/caseService";
-import { apiCreateWomenSoloParentCase, saveSecretarySubmittedCase } from "../services/caseService";
+import { apiCreateWomenSoloParentCase, saveSecretarySubmittedCase, apiResubmitReturnedCase } from "../services/caseService";
 
 interface NewWomenSoloParentModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (record: DbCaseRecord) => void;
+  returnedRecord?: DbCaseRecord | null;
 }
 
 
@@ -24,7 +25,7 @@ const SOLO_PARENT_REASONS = [
   "Spouse Incarcerated / Incapacitated"
 ];
 
-export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomenSoloParentModalProps) {
+export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess, returnedRecord }: NewWomenSoloParentModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [documents, setDocuments] = useState<IntakeDocument[]>([]);
   const [trackingNumber, setTrackingNumber] = useState(() => `BEN-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`);
@@ -47,7 +48,8 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
   const [initialStatus, setInitialStatus] = useState<"BARANGAY_ENDORSED" | "UNDER_REVIEW">("BARANGAY_ENDORSED");
   const [notes, setNotes] = useState("");
 
-  const requirements = category === "SOLO_PARENT" ? SOLO_PARENT_REQUIREMENTS : WOMEN_REQUIREMENTS;
+  const baseRequirements = category === "SOLO_PARENT" ? SOLO_PARENT_REQUIREMENTS : WOMEN_REQUIREMENTS;
+  const requirements = Array.from(new Map([...baseRequirements, ...(returnedRecord?.documents || []).map(doc => ({ id: doc.id, name: doc.name }))].map(item => [item.id, item])).values());
 
   useEffect(() => {
     if (isOpen) return;
@@ -60,6 +62,20 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
     setIndigencyLevel("Low Income (₱5,000 - ₱10,000/mo)");
     setNotes("");
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !returnedRecord) return;
+    setTrackingNumber(returnedRecord.case_number);
+    setFirstName(returnedRecord.first_name || ''); setMiddleName(returnedRecord.middle_name || '');
+    setLastName(returnedRecord.last_name || ''); setExtensionName(returnedRecord.extension_name || '');
+    setBirthDate(returnedRecord.birth_date || ''); setGender(returnedRecord.gender || 'FEMALE');
+    setCivilStatus(returnedRecord.civil_status || 'SINGLE'); setBarangay(returnedRecord.barangay_name || '');
+    setContactNumber(returnedRecord.contact_number || ''); setInitialStatus('BARANGAY_ENDORSED');
+    setDocuments([]);
+    setCategory(returnedRecord.category || 'SOLO_PARENT'); setDependentChildren(returnedRecord.dependent_children ?? 0);
+    setSoloParentReason(returnedRecord.solo_parent_reason || ''); setIndigencyLevel(returnedRecord.indigency_level || '');
+    setNotes(returnedRecord.intake_notes || '');
+  }, [isOpen, returnedRecord]);
 
   if (!isOpen) return null;
 
@@ -83,7 +99,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
 
     try {
       setIsSubmitting(true);
-      const createdRecord = await apiCreateWomenSoloParentCase({
+      const payload = {
         case_number: trackingNumber,
         firstName: firstName.trim(),
         middleName: middleName.trim(),
@@ -97,21 +113,24 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
         indigencyLevel,
         category,
         dependentChildren: category === "SOLO_PARENT" ? Number(dependentChildren) : 0,
-        soloParentReason: category === "SOLO_PARENT" ? soloParentReason : undefined,
-        status: initialStatus,
-        financialAidAmount: 3000,
+        soloParentReason: category === "SOLO_PARENT" ? soloParentReason : "",
+        status: returnedRecord ? "BARANGAY_ENDORSED" : initialStatus,
+        financialAidAmount: Number(returnedRecord?.financial_aid_amount ?? 1000),
         notes: notes.trim() || undefined,
-      }, selectedDocuments);
+      };
+      const createdRecord = returnedRecord
+        ? await apiResubmitReturnedCase(returnedRecord.case_number, { ...payload, notes: undefined, applicantNotes: notes.trim() }, 'women-solo-parent', returnedRecord.workflow_version, selectedDocuments)
+        : await apiCreateWomenSoloParentCase(payload, selectedDocuments);
 
       const assignedTracking = (createdRecord as any)?.tracking_id || createdRecord?.case_number || trackingNumber;
       saveSecretarySubmittedCase(assignedTracking);
-      toast.success(`Beneficiary profile registered successfully with Tracking ID: ${assignedTracking}`);
+      toast.success(returnedRecord ? `Corrections re-endorsed for MSWD review: ${assignedTracking}` : `Beneficiary profile registered successfully with Tracking ID: ${assignedTracking}`);
       setDocuments([]);
       onSuccess(createdRecord);
       onClose();
     } catch (err: any) {
       console.error("Error creating beneficiary:", err);
-      toast.error(err.message || "Failed to register beneficiary record.");
+      toast.error(err.message || "Could not save the beneficiary record.", { id: returnedRecord ? "document-resubmission" : undefined });
     } finally {
       setIsSubmitting(false);
     }
@@ -134,10 +153,10 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
             </div>
             <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
               <UserPlus className="size-5 text-blue-300" />
-              New Beneficiary Registration
+              {returnedRecord ? "Correct & Resubmit Applicant" : "New Beneficiary Registration"}
             </h2>
             <p className="text-xs text-blue-200 mt-0.5">
-              Women & Solo Parent Welfare Program — Municipality of Calabanga
+              {returnedRecord ? `MSWD correction instructions: ${returnedRecord.correction_notes || "Update the saved applicant information."}` : <>Women & Solo Parent Welfare Program — Municipality of Calabanga</>}
             </p>
           </div>
           <button
@@ -302,6 +321,8 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
                   onChange={(e) => setCivilStatus(e.target.value)}
                   className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
                 >
+                  {civilStatus && !["SINGLE", "SINGLE_PARENT", "WIDOWED", "SEPARATED", "ANNULLED", "MARRIED", "COMMON_LAW"].includes(civilStatus) && <option value={civilStatus}>{civilStatus}</option>}
+                  <option value="SINGLE">Single</option>
                   <option value="SINGLE_PARENT">Single Parent</option>
                   <option value="WIDOWED">Widowed</option>
                   <option value="SEPARATED">Separated / Abandoned</option>
@@ -321,6 +342,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
                   onChange={(e) => setBarangay(e.target.value)}
                   className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
                 >
+                  <option value="" disabled>Select barangay</option>
                   {barangay && !CALABANGA_BARANGAYS.includes(barangay) && <option value={barangay}>Brgy. {barangay} (existing assignment)</option>}
                   {CALABANGA_BARANGAYS.map((b) => (
                     <option key={b} value={b}>
@@ -353,6 +375,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
                   onChange={(e) => setIndigencyLevel(e.target.value)}
                   className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white"
                 >
+                  {indigencyLevel && !["Extremely Indigent (< ₱5,000/mo)", "Low Income (₱5,000 - ₱10,000/mo)", "Below Poverty Threshold (₱10,001 - ₱15,000/mo)"].includes(indigencyLevel) && <option value={indigencyLevel}>{indigencyLevel}</option>}
                   <option value="Extremely Indigent (< ₱5,000/mo)">Extremely Indigent (&lt; ₱5,000/mo)</option>
                   <option value="Low Income (₱5,000 - ₱10,000/mo)">Low Income (₱5,000 - ₱10,000/mo)</option>
                   <option value="Below Poverty Threshold (₱10,001 - ₱15,000/mo)">Below Poverty Threshold (₱10,001 - ₱15,000/mo)</option>
@@ -396,6 +419,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
                     onChange={(e) => setSoloParentReason(e.target.value)}
                     className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none bg-white"
                   >
+                    {soloParentReason && !SOLO_PARENT_REASONS.includes(soloParentReason) && <option value={soloParentReason}>{soloParentReason}</option>}
                     {SOLO_PARENT_REASONS.map((r) => (
                       <option key={r} value={r}>
                         {r}
@@ -425,7 +449,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
                   className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white font-medium"
                 >
                   <option value="BARANGAY_ENDORSED">BARANGAY ENDORSED (Step 1 Awaiting Intake)</option>
-                  <option value="UNDER_REVIEW">UNDER REVIEW (Step 2 Verification In Progress)</option>
+                  <option value="UNDER_REVIEW" disabled={Boolean(returnedRecord)}>UNDER REVIEW (Step 2 Verification In Progress)</option>
                 </select>
               </div>
 
@@ -457,7 +481,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
             </div>
           </div>
           <IntakeDocumentUploads
-            requirements={requirements}
+            requirements={requirements} existingDocuments={returnedRecord?.documents || []}
             documents={documents}
             onChange={setDocuments}
             disabled={isSubmitting}
@@ -492,7 +516,7 @@ export function NewWomenSoloParentModal({ isOpen, onClose, onSuccess }: NewWomen
               ) : (
                 <>
                   <CheckCircle2 className="size-4" />
-                  Save & Register Beneficiary
+                  {returnedRecord ? "Save & Re-endorse Corrections" : "Save & Register Beneficiary"}
                 </>
               )}
             </Button>

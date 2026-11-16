@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Users,
   FolderOpen,
@@ -21,13 +21,13 @@ import { Button } from "../../components/ui/button";
 import { Badge } from "../../components/ui/badge";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
-  ResponsiveContainer, PieChart, Pie, Cell 
+  ResponsiveContainer, PieChart, Pie, Cell, LabelList 
 } from "recharts";
 import { toast } from "sonner";
 import { 
   apiGetDashboardStats, 
   subscribeDataUpdated, 
-  type DashboardStats 
+  type DashboardStats, type DashboardPeriod 
 } from "../../services/caseService";
 
 interface MainDashboardProps {
@@ -59,31 +59,45 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
   const [stats, setStats] = useState<DashboardStats>(DEFAULT_STATS);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+
+  const [period, setPeriod] = useState<DashboardPeriod>('all');
+  const [selectedBarangay, setSelectedBarangay] = useState('');
+  const requestVersion = useRef(0);
+  const pendingRequest = useRef<AbortController | null>(null);
 
   const loadStats = useCallback(async (showToast = false) => {
+    const version = ++requestVersion.current;
+    pendingRequest.current?.abort();
+    const controller = new AbortController();
+    pendingRequest.current = controller;
+    if (showToast) setIsRefreshing(true);
+    setLoadError(false);
     try {
-      if (showToast) setIsRefreshing(true);
-      const data = await apiGetDashboardStats();
-      if (data) {
+      const data = await apiGetDashboardStats({ period, barangay: selectedBarangay }, controller.signal);
+      if (version === requestVersion.current) {
         setStats(data);
-        if (showToast) toast.success("Dashboard metrics updated with live PostgreSQL data");
+        if (showToast) toast.success('Dashboard metrics refreshed');
       }
-    } catch (err: any) {
-      console.warn("[Dashboard] Could not fetch live statistics:", err);
-      if (showToast) toast.error("Could not refresh dashboard statistics");
+    } catch (error: any) {
+      if (error?.name !== 'AbortError' && version === requestVersion.current) {
+        setLoadError(true);
+        setStats(DEFAULT_STATS);
+        toast.error('Could not load dashboard statistics. Please refresh to retry.');
+      }
     } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      if (version === requestVersion.current) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
     }
-  }, []);
+  }, [period, selectedBarangay]);
 
   useEffect(() => {
-    loadStats();
-    // Subscribe to real-time events triggered by case creation or 8-step updates
-    const unsubscribe = subscribeDataUpdated(() => {
-      loadStats();
-    });
-    return unsubscribe;
+    setIsLoading(true);
+    void loadStats();
+    const unsubscribe = subscribeDataUpdated(() => loadStats());
+    return () => { unsubscribe(); ++requestVersion.current; pendingRequest.current?.abort(); };
   }, [loadStats]);
 
   const today = new Date().toLocaleDateString("en-US", {
@@ -97,8 +111,8 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
   const soloCount = stats.categoryBreakdown.find((c) => c.name === "Solo Parent")?.value || 0;
   const vawcCount = stats.categoryBreakdown.find((c) => c.name.includes("VAWC"))?.value || 0;
   const womenSoloTotal = soloCount + vawcCount || 1;
-  const soloPercent = Math.round((soloCount / womenSoloTotal) * 100);
-  const vawcPercent = Math.round((vawcCount / womenSoloTotal) * 100);
+  const soloPercent = Math.round((soloCount / womenSoloTotal) * 1000) / 10;
+  const vawcPercent = Math.round((vawcCount / womenSoloTotal) * 1000) / 10;
 
   // Solo Parent vs VAWC Chart Data
   const soloVawcChartData = [
@@ -118,9 +132,11 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
       ];
 
   const totalAicsCount = aicsChartData.reduce((acc, curr) => acc + curr.value, 0);
+  const percent = (value: number, total: number) => total ? Math.round(value / total * 1000) / 10 : 0;
+  const filteredRecords = stats.filteredRecords || [];
 
   return (
-    <div className="h-full bg-gray-50 overflow-y-auto">
+    <div className="h-full bg-gray-50 overflow-y-auto" aria-busy={isLoading}>
       <div className="max-w-[1600px] mx-auto px-6 sm:px-8 py-8 space-y-8">
         
         {/* Header Section */}
@@ -133,10 +149,6 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
               >
                 Municipal Welfare Dashboard
               </h1>
-              <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 text-[11px] font-medium gap-1 px-2 py-0.5">
-                <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Live PostgreSQL Sync
-              </Badge>
             </div>
             <p className="text-[14px] text-gray-500 mt-1">
               Welcome back, {userRole} — {today}
@@ -146,7 +158,18 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 self-start sm:self-auto">
+          <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
+            <select aria-label="Dashboard date range" title="Filter by intake registration date (Philippine time)"
+              value={period} onChange={event => setPeriod(event.target.value as DashboardPeriod)}
+              className="h-9 rounded-md border border-gray-200 bg-white px-3 text-xs text-gray-700 shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="all">All-Time</option>
+              <option value="month">This Month</option>
+              <option value="year">This Year</option>
+            </select>
+            {selectedBarangay && <Button variant="outline" size="sm" onClick={() => setSelectedBarangay('')}
+              className="h-9 border-blue-200 bg-blue-50 text-xs text-blue-900" aria-label="Clear barangay filter">
+              {selectedBarangay} (clear)
+            </Button>}
             <Button
               variant="outline"
               size="sm"
@@ -196,7 +219,7 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
                 Total Beneficiaries Profiled
               </p>
               <p className="text-3xl font-bold text-gray-900 mb-1">
-                {isLoading ? "—" : stats.totalBeneficiaries}
+                {isLoading || loadError ? "—" : stats.totalBeneficiaries}
               </p>
               <p className="text-xs text-gray-400">
                 Sum of Women, Solo Parent &amp; AICS cases
@@ -219,7 +242,7 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
                 Active / Pending Cases
               </p>
               <p className="text-3xl font-bold text-gray-900 mb-1">
-                {isLoading ? "—" : stats.activeCases}
+                {isLoading || loadError ? "—" : stats.activeCases}
               </p>
               <p className="text-xs text-gray-400">
                 Endorsed, Under Review &amp; In Assessment
@@ -242,7 +265,7 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
                 Approved / Released Cases
               </p>
               <p className="text-3xl font-bold text-gray-900 mb-1">
-                {isLoading ? "—" : stats.approvedReleasedCases}
+                {isLoading || loadError ? "—" : stats.approvedReleasedCases}
               </p>
               <p className="text-xs text-gray-400">
                 Approved for release &amp; Disbursed payouts
@@ -265,7 +288,7 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
                 Total Financial Aid Disbursed
               </p>
               <p className="text-2xl font-bold text-gray-900 mb-1">
-                {isLoading ? "—" : `₱${stats.totalDisbursed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                {isLoading || loadError ? "—" : `₱${stats.totalDisbursed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
               </p>
               <p className="text-xs text-gray-400">
                 Sum of released financial assistance (PHP)
@@ -314,7 +337,7 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
                         <Cell key={`sp-cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: "#fff", border: "1px solid #e5e7eb", borderRadius: "8px", fontSize: "12px" }} />
+                    <Tooltip formatter={(value, name) => [`${Number(value).toLocaleString()} cases (${percent(Number(value), soloCount + vawcCount)}%)`, String(name)]} contentStyle={{ backgroundColor: "#fff", border: "1px solid #e5e7eb", borderRadius: "8px", fontSize: "12px" }} />
                   </PieChart>
                 </ResponsiveContainer>
 
@@ -373,15 +396,16 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
 
               <div className="flex-1">
                 <ResponsiveContainer width="100%" height={170}>
-                  <BarChart data={aicsChartData} barSize={26}>
+                  <BarChart data={aicsChartData} barSize={26} margin={{ top: 16, right: 4, bottom: 0, left: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
                     <XAxis dataKey="name" stroke="#9ca3af" fontSize={10} tickLine={false} axisLine={false} />
                     <YAxis stroke="#9ca3af" fontSize={10} tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip 
+                    <Tooltip formatter={(value) => [`${Number(value).toLocaleString()} cases (${percent(Number(value), totalAicsCount)}%)`, "Cases"]}
                       contentStyle={{ backgroundColor: "#fff", border: "1px solid #e5e7eb", borderRadius: "8px", fontSize: "12px" }}
                       labelStyle={{ fontWeight: 600, color: "#1e3a8a" }}
                     />
                     <Bar dataKey="value" name="Cases" fill="#3b82f6" radius={[6, 6, 0, 0]}>
+                      <LabelList dataKey="value" position="top" fontSize={10} fill="#374151" />
                       {aicsChartData.map((entry, index) => (
                         <Cell key={`aics-cell-${index}`} fill={entry.color} />
                       ))}
@@ -394,7 +418,7 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
                     <div key={idx} className="flex items-center gap-1">
                       <span className="size-2 rounded-full" style={{ backgroundColor: item.color }} />
                       <span>{item.name}:</span>
-                      <span className="font-semibold text-gray-700">{item.value}</span>
+                      <span className="font-semibold text-gray-700">{item.value} ({percent(item.value, totalAicsCount)}%)</span>
                     </div>
                   ))}
                 </div>
@@ -438,7 +462,10 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
                     const maxVal = stats.barangayDistribution[0]?.count || 1;
                     const pct = Math.min(100, Math.round((b.count / maxVal) * 100));
                     return (
-                      <div key={idx} className="text-xs">
+                      <button key={b.barangay} type="button" aria-pressed={selectedBarangay === b.barangay}
+                        aria-label={`Filter dashboard by ${b.barangay}`}
+                        onClick={() => setSelectedBarangay(current => current === b.barangay ? '' : b.barangay)}
+                        className={`text-xs w-full text-left rounded focus-visible:outline-2 focus-visible:outline-blue-500 hover:bg-blue-50 ${selectedBarangay === b.barangay ? 'bg-blue-50' : ''}`}>
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-medium text-gray-800 flex items-center gap-1.5">
                             <span className="text-[10px] text-gray-400 font-mono">#{idx + 1}</span>
@@ -454,7 +481,7 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
                             style={{ width: `${pct}%` }}
                           />
                         </div>
-                      </div>
+                      </button>
                     );
                   })
                 ) : (
@@ -491,10 +518,10 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
                         className="text-base font-semibold text-blue-900"
                         style={{ fontFamily: "'Libre Franklin', sans-serif" }}
                       >
-                        Recent Activity Feed &amp; Audit Trail
+                        {selectedBarangay ? `Beneficiary Records - ${selectedBarangay}` : 'Recent Activity Feed & Audit Trail'}
                       </h3>
                       <p className="text-xs text-gray-400">
-                        Real-time log of registrations, document verifications, and 8-step workflow updates
+                        {selectedBarangay ? `Registered cases matching the selected date range (${stats.matchedRecords ?? 0} records)` : 'Real-time log of registrations, document verifications, and 8-step workflow updates'}
                       </p>
                     </div>
                   </div>
@@ -505,7 +532,18 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
                 </div>
 
                 <div className="space-y-3">
-                  {stats.recentActivities && stats.recentActivities.length > 0 ? (
+                  {loadError ? <p role="alert" className="py-10 text-center text-xs text-gray-400">Could not load dashboard data. Select Refresh Data to retry.</p> : selectedBarangay ? (
+                    isLoading ? <p className="py-10 text-center text-xs text-gray-400">Loading matching records...</p> : filteredRecords.length ? <>
+                      {filteredRecords.map(record => <div key={`${record.module}-${record.id}`} className="flex flex-col gap-1 rounded-xl border border-gray-100 p-3.5 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="break-words text-sm font-semibold text-gray-900">{record.name}</p>
+                          <p className="break-words text-xs text-gray-500">{record.id} - {record.program} - {record.barangay}</p>
+                        </div>
+                        <Badge variant="outline" className="self-start text-xs text-blue-900">{record.status}</Badge>
+                      </div>)}
+                      {(stats.matchedRecords || 0) > filteredRecords.length && <p className="text-xs text-gray-500">Showing the latest {filteredRecords.length} of {stats.matchedRecords} matching records.</p>}
+                    </> : <p className="py-10 text-center text-xs text-gray-400">No records found for this barangay and date range.</p>
+                  ) : stats.recentActivities && stats.recentActivities.length > 0 ? (
                     stats.recentActivities.map((act) => {
                       const isApproved = act.status?.includes("APPROVED") || act.status?.includes("RELEASED") || act.status?.includes("CLOSED");
                       const isPending = act.status?.includes("ENDORSED") || act.status?.includes("REVIEW") || act.status?.includes("ASSESSMENT");

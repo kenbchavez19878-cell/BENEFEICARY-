@@ -157,6 +157,7 @@ class ApplicationAccount(models.Model):
 
 
 class CaseIntakeFields(models.Model):
+    submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="%(app_label)s_%(class)s_intakes")
     # Legacy records retain their original display name; never guess name parts.
     first_name = models.CharField(max_length=120, blank=True, default='')
     middle_name = models.CharField(max_length=120, blank=True, default='')
@@ -220,7 +221,7 @@ class WomenAndSoloParentCase(CaseIntakeFields):
         decimal_places=2,
         null=True,
         blank=True,
-        default=Decimal('3000.00')
+        default=Decimal('1000.00')
     )
     referrals = models.JSONField(default=list, blank=True, null=True)
     release_method = models.CharField(
@@ -360,7 +361,7 @@ class AicsCase(CaseIntakeFields):
         decimal_places=2,
         null=True,
         blank=True,
-        default=Decimal('5000.00')
+        default=Decimal('1000.00')
     )
     release_method = models.CharField(
         max_length=50,

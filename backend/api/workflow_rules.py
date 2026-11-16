@@ -126,6 +126,7 @@ def validate_workflow(instance, attrs, workflow, sections, is_aics):
     phase('eligibilityDetails', {'IN_ASSESSMENT', 'ELIGIBILITY_EVALUATED'})
     phase('servicePlan', {'ELIGIBILITY_EVALUATED'})
     phase('serviceRelease', {'APPROVED_FOR_RELEASE'})
+    phase('requiredDocumentReplacements', {'UNDER_REVIEW', 'IN_ASSESSMENT', 'ELIGIBILITY_EVALUATED', 'APPROVED_FOR_RELEASE'})
     phase('correctionNotes', {'UNDER_REVIEW', 'IN_ASSESSMENT', 'ELIGIBILITY_EVALUATED', 'APPROVED_FOR_RELEASE'})
     for field in ('release_method', 'payout_date', 'guarantee_letter_number'):
         if field in attrs and attrs[field] != getattr(instance, field, None) and source != 'APPROVED_FOR_RELEASE':
@@ -169,7 +170,7 @@ def validate_workflow(instance, attrs, workflow, sections, is_aics):
     award_field = 'approved_amount' if is_aics else 'financial_aid_amount'
     award = amount(attrs.get(award_field, getattr(instance, award_field)))
     for field in (award_field, 'aics_type' if is_aics else 'category'):
-        if field in attrs and attrs[field] != getattr(instance, field) and source != 'ELIGIBILITY_EVALUATED':
+        if field in attrs and attrs[field] != getattr(instance, field) and source not in {'ELIGIBILITY_EVALUATED', 'RETURNED_FOR_CORRECTION'}:
             raise ValidationError({field: 'Material award/category changes require a new planning decision.'})
     plan = workflow.get('servicePlan', {})
     decision = attrs.get('eligibility', instance.eligibility)
@@ -181,6 +182,9 @@ def validate_workflow(instance, attrs, workflow, sections, is_aics):
         elif target == 'UNDER_REVIEW':
             completed = {'endorsementReviewed': stamp}
         elif target == 'RETURNED_FOR_CORRECTION':
+            if 'requiredDocumentReplacements' not in sections:
+                decisions = attrs.get('documents_status', instance.documents_status) or {}
+                workflow['requiredDocumentReplacements'] = [key for key, decision in decisions.items() if decision == 'Invalid']
             if 'correctionNotes' not in sections or not text(workflow.get('correctionNotes')):
                 raise ValidationError({'correctionNotes': 'Explain the specific corrections or missing requirements before returning this case.'})
             completed = {}

@@ -1,3 +1,4 @@
+import { openDocumentPreview } from "../services/documentService";
 import { ELIGIBILITY_CODES, getWorkflowStepError, workflowStepPayload, nonFinancialKind, releaseMethod, accessibleStep } from "../utils/caseWorkflowData";
 import type { IntakeProfile } from "../utils/intakeProfile";
 import React, { useState, useEffect, useRef } from "react";
@@ -163,12 +164,19 @@ export interface TimelineEntry {
   type?: "visit" | "update" | "note" | "status";
 }
 
+async function openWorkflowDocument(event: React.MouseEvent<HTMLAnchorElement>, url: string) {
+  event.preventDefault();
+  try { await openDocumentPreview(url); }
+  catch (error) { toast.error(error instanceof Error ? error.message : 'Could not open the uploaded document.'); }
+}
+
 export interface DocumentCheckItem {
   id: string;
   name: string;
   status: "Valid" | "Incomplete" | "Invalid";
   fileRef?: string;
   fileUrl?: string;
+  replacementRequired?: boolean;
   reviewed?: boolean;
 }
 
@@ -244,7 +252,7 @@ export function buildSafeCaseData(
     trackingId: rawItem?.trackingId ?? mapped.trackingId,
     beneficiaryName: rawItem?.beneficiaryName ?? mapped.beneficiaryName,
     beneficiaryId: rawItem?.beneficiaryId ?? mapped.beneficiaryId,
-    applicantProfile: rawItem?.applicantProfile ?? mapped.applicantProfile,
+    applicantProfile: { ...mapped.applicantProfile!, ...rawItem?.applicantProfile },
     barangay: rawItem?.barangay ?? mapped.barangay,
     statusCode: rawItem?.statusCode ?? mapped.statusCode,
     endorsementDate: rawItem?.endorsementDate ?? mapped.endorsementDate,
@@ -367,25 +375,27 @@ function MSWDCaseWorkflowModalInner({
   const validationSaveInFlight = useRef(false);
   const requestInFlight = useRef(false);
   const workflowVersion = useRef<number | undefined>(caseState.workflowVersion);
-  const { online: databaseOnline, refresh: refreshDatabaseHealth } = useDatabaseHealth(isOpen);
-  const dbSyncStatus = isSaving ? "saving" : databaseOnline === false ? "error" : "synced";
+  const { refresh: refreshDatabaseHealth } = useDatabaseHealth(isOpen);
   const [isLoadingCase, setIsLoadingCase] = useState(false);
+  const [caseLoadFailed, setCaseLoadFailed] = useState(false);
   const [correctionNotes, setCorrectionNotes] = useState("");
 
   // Load live case record and audit log history directly from PostgreSQL backend on mount / update
   useEffect(() => {
     if (!isOpen) return;
     let active = true;
+    setCaseLoadFailed(false);
     if (caseItem) {
       setCaseState(buildSafeCaseData(caseItem, effectiveModuleType));
     }
     const targetLookup = caseItem?.trackingId || caseItem?.id || caseItem?.case_number;
-    if (!targetLookup) setIsLoadingCase(false);
+    if (!targetLookup) { setIsLoadingCase(false); setCaseLoadFailed(true); }
     if (targetLookup) {
       setIsLoadingCase(true);
       apiGetCaseById(targetLookup, effectiveModuleType)
         .then((res) => {
-          if (active && res && res.data) {
+          if (!res?.data || res.data.id == null) throw new Error("The saved intake response was incomplete. Close and reopen the case to retry.");
+          if (active) {
             const mapped = mapDbRecordToCaseData(res.data, effectiveModuleType);
             workflowVersion.current = mapped.workflowVersion;
             setCaseState(mapped);
@@ -394,8 +404,11 @@ function MSWDCaseWorkflowModalInner({
           }
         })
         .catch((err) => {
-          console.warn("[PostgreSQL] Loaded from local cache or props:", err?.message);
-          if (active) refreshDatabaseHealth();
+          if (active) {
+            setCaseLoadFailed(true);
+            toast.error(err?.message || 'Could not load the saved intake. Close and reopen the case to retry.');
+            refreshDatabaseHealth();
+          }
         })
         .finally(() => {
           if (active) setIsLoadingCase(false);
@@ -407,6 +420,7 @@ function MSWDCaseWorkflowModalInner({
   // Helper to persist step updates directly to PostgreSQL backend
   const persistStepData = async (stepNumber: number, payload: any) => {
     if (requestInFlight.current || isSecretary || isLoadingCase) return null;
+    if (caseLoadFailed) { toast.error('Load the saved intake successfully before processing this case. Close and reopen it to retry.'); return null; }
     if (caseState.statusCode === "CASE_CLOSED") {
       toast.info("This case is closed and available for read-only review.");
       return null;
@@ -606,10 +620,6 @@ function MSWDCaseWorkflowModalInner({
                   Staff Case Validator
                 </Badge>
               )}
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/70 text-emerald-200 border border-emerald-500/40 shadow-xs">
-                <span className={`size-1.5 rounded-full ${dbSyncStatus === 'saving' ? 'bg-amber-400 animate-ping' : dbSyncStatus === 'error' ? 'bg-red-400' : 'bg-emerald-400 animate-pulse'}`} />
-                {dbSyncStatus === 'saving' ? 'Saving to PostgreSQL...' : dbSyncStatus === 'error' ? 'Database Offline' : 'PostgreSQL Connected'}
-              </span>
             </div>
             <h2 className="text-lg font-extrabold tracking-tight text-white">
               MSWD Case Processing: {caseState.beneficiaryName}
@@ -862,7 +872,7 @@ function MSWDCaseWorkflowModalInner({
                           <FileText className="size-3.5 text-blue-800" />
                           <div>
                             <p className="font-medium text-gray-900 text-[11px]">{doc.name}</p>
-                            <p className="text-[10px] text-gray-400 font-mono">{doc.fileUrl ? <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer" aria-label={`Open ${doc.name}`}>{doc.fileRef}</a> : "No file attached"}</p>
+                            <p className="text-[10px] text-gray-400 font-mono">{doc.fileUrl ? <a href={doc.fileUrl} onClick={event => void openWorkflowDocument(event, doc.fileUrl!)} target="_blank" rel="noopener noreferrer" aria-label={`Open ${doc.name}`}>{doc.fileRef}</a> : "No file attached"}</p>
                           </div>
                         </div>
                         <Badge className={`${
@@ -981,7 +991,7 @@ function MSWDCaseWorkflowModalInner({
                       </div>
                       <div className="text-xs">
                         <p className="font-bold text-gray-900">{doc.name}</p>
-                        <p className="text-gray-400 font-mono text-[10px]">{doc.fileUrl ? <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer" aria-label={`Open ${doc.name}`}>{doc.fileRef}</a> : "No file attached"}</p>
+                        <p className="text-gray-400 font-mono text-[10px]">{doc.fileUrl ? <a href={doc.fileUrl} onClick={event => void openWorkflowDocument(event, doc.fileUrl!)} target="_blank" rel="noopener noreferrer" aria-label={`Open ${doc.name}`}>{doc.fileRef}</a> : "No file attached"}</p>
                       </div>
                     </div>
 

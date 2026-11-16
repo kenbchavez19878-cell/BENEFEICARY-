@@ -60,17 +60,18 @@ class AuthenticationTests(TestCase):
             self.assertEqual(client.get(f'/api/cases/{other.tracking_id}?module={module}').status_code, 404)
             self.assertEqual(client.get(f'/api/cases/{module}?barangay=Other').data['data'], [])
 
-    def test_secretary_can_intake_but_cannot_change_barangay_or_perform_staff_actions(self):
+    def test_secretary_can_select_barangay_but_cannot_perform_staff_actions(self):
         client = self.client_for(self.secretary)
         for module in ('aics', 'women-solo-parent'):
             created = client.post(f'/api/cases/{module}', intake_payload(module), format='json')
             self.assertEqual(created.status_code, 201, created.data)
             case = created.data['data']
-            for body in ({'status': 'UNDER_REVIEW'}, {'documents_status': {'id': 'Valid'}}, {'eligibility': 'ELIGIBLE'}, {'barangay': 'Other'}, {'barangay_name': 'Other'}, {'servicePlan': {}}):
+            for body in ({'status': 'UNDER_REVIEW'}, {'documents_status': {'id': 'Valid'}}, {'eligibility': 'ELIGIBLE'}, {'servicePlan': {}}):
                 for endpoint in (f'/api/cases/{module}/{case["id"]}/step', f'/api/cases/{module}/{case["id"]}', f'/api/cases/{case["tracking_id"]}/step?module={module}'):
                     self.assertEqual(client.patch(endpoint, body, format='json').status_code, 403)
-            denied = client.post(f'/api/cases/{module}', intake_payload(module, barangay='Other'), format='json')
-            self.assertEqual(denied.status_code, 403)
+            selected = client.post(f'/api/cases/{module}', intake_payload(module, barangay='Punta Tarawal'), format='json')
+            self.assertEqual(selected.status_code, 201, selected.data)
+            self.assertEqual(selected.data['data']['barangay_name'], 'Punta Tarawal')
 
     def test_secretary_can_resubmit_corrections_but_not_edit_under_review(self):
         client = self.client_for(self.secretary)

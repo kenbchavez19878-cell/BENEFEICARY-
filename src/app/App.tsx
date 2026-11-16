@@ -1,6 +1,6 @@
 import { toast } from "sonner";
 import { logoutAccount } from "./services/authService";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
 import { LoginForm } from "./components/Website/LoginFormEnhanced";
 const MSWDDashboardLayout = lazy(() => import("./components/MSWD Staff/MSWDStaffDashboardLayout").then(module => ({ default: module.DashboardLayout })));
 const BarangayRegistrarDashboardLayout = lazy(() => import("./components/Barangay Secretary/BarangaySecretaryDashboardLayout").then(module => ({ default: module.DashboardLayout })));
@@ -26,6 +26,19 @@ export default function App() {
   const [view, setView] = useState<AppView>("website");
   const [userRole, setUserRole] = useState("");
   const [accountId, setAccountId] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    const expired = () => {
+      sessionStorage.removeItem('benefitrack_active_role');
+      sessionStorage.removeItem('benefitrack_account_id');
+      setUserRole('');
+      setAccountId(undefined);
+      setView('login');
+      toast.info('Your session has expired. Please sign in again.');
+    };
+    window.addEventListener('benefitrack:session-expired', expired);
+    return () => window.removeEventListener('benefitrack:session-expired', expired);
+  }, []);
 
   const handleLogin = (role: string, id?: string) => {
     setUserRole(role);
