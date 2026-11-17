@@ -521,7 +521,7 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
                         {selectedBarangay ? `Beneficiary Records - ${selectedBarangay}` : 'Recent Activity Feed & Audit Trail'}
                       </h3>
                       <p className="text-xs text-gray-400">
-                        {selectedBarangay ? `Registered cases matching the selected date range (${stats.matchedRecords ?? 0} records)` : 'Real-time log of registrations, document verifications, and 8-step workflow updates'}
+                        {selectedBarangay ? `Registered cases matching the selected date range (${stats.matchedRecords ?? 0} records)` : 'Real-time log of registrations, document verifications, and application status updates'}
                       </p>
                     </div>
                   </div>
@@ -667,7 +667,7 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
                 className="text-sm font-semibold text-blue-900 mb-3"
                 style={{ fontFamily: "'Libre Franklin', sans-serif" }}
               >
-                Official 8-Step Workflow Status
+                Application Status Overview
               </h4>
               <div className="space-y-2.5 text-xs">
                 <div className="flex items-center justify-between p-2 rounded-lg bg-gray-50">

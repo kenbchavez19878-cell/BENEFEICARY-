@@ -790,7 +790,7 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
             Women &amp; Solo Parent Assistance
           </h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            Municipal Social Welfare &amp; Development — Beneficiary Profiling &amp; 8-Step Workflow
+            Municipal Social Welfare &amp; Development — Beneficiary Profiling &amp; Application Status
           </p>
         </div>
       </div>
@@ -950,7 +950,7 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                                       onClick={() => handleOpenWorkflow(record)}
                                       className="bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100 font-bold"
                                     >
-                                      8-Step Workflow
+                                      Application Status
                                     </Button>
                                     <Button 
                                       variant="outline" 

@@ -820,7 +820,7 @@ export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: Fro
             AICS Crisis Assistance
           </h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            Assistance to Individuals in Crisis Situations — Beneficiary Intake &amp; 8-Step Workflow
+            Assistance to Individuals in Crisis Situations — Beneficiary Intake &amp; Application Status
           </p>
         </div>
       </div>
@@ -980,7 +980,7 @@ export function AICS({ onNavigate, allowedSubModules, userRole, accountId }: Fro
                                       onClick={() => handleOpenWorkflow(record)}
                                       className="bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100 font-bold"
                                     >
-                                      8-Step Workflow
+                                      Application Status
                                     </Button>
                                     <Button 
                                       variant="outline" 
