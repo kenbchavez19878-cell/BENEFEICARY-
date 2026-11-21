@@ -142,6 +142,8 @@ class LockedCaseWrites:
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         ensure_case_open(instance)
+        if instance.payout_proofs.exists():
+            raise ValidationError({'payout_proof': 'Cases with verified payout proof cannot be deleted through workflow endpoints.'})
         self.perform_destroy(instance)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -152,7 +154,7 @@ class WomenAndSoloParentCaseViewSet(LockedCaseWrites, viewsets.ModelViewSet):
     Full CRUD ModelViewSet for Women & Solo Parent cases.
     Dual-supports ID, case_number, and tracking_id lookups.
     """
-    queryset = WomenAndSoloParentCase.objects.prefetch_related(Prefetch("attachments", queryset=CaseDocument.objects.order_by("pk")))
+    queryset = WomenAndSoloParentCase.objects.prefetch_related(Prefetch("attachments", queryset=CaseDocument.objects.order_by("pk")), "payout_proofs")
     serializer_class = WomenAndSoloParentCaseSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['case_number', 'tracking_id', 'beneficiary_name', 'barangay_name', 'spic_number', 'booklet_number']
@@ -268,7 +270,7 @@ class AicsCaseViewSet(LockedCaseWrites, viewsets.ModelViewSet):
     Full CRUD ModelViewSet for AICS Crisis cases.
     Dual-supports ID, case_number, and tracking_id lookups.
     """
-    queryset = AicsCase.objects.prefetch_related(Prefetch("attachments", queryset=CaseDocument.objects.order_by("pk")))
+    queryset = AicsCase.objects.prefetch_related(Prefetch("attachments", queryset=CaseDocument.objects.order_by("pk")), "payout_proofs")
     serializer_class = AicsCaseSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['case_number', 'tracking_id', 'beneficiary_name', 'barangay_name', 'guarantee_letter_number', 'service_provider']
@@ -401,7 +403,7 @@ class UniversalCaseDetailView(APIView):
         ):
             if module_hint and module != module_hint:
                 continue
-            queryset = scope_cases(model.objects.all(), user).prefetch_related(Prefetch("attachments", queryset=CaseDocument.objects.order_by("pk")))
+            queryset = scope_cases(model.objects.all(), user).prefetch_related(Prefetch("attachments", queryset=CaseDocument.objects.order_by("pk")), "payout_proofs")
             if lock:
                 queryset = queryset.select_for_update()
             query = Q(case_number=lookup_val) | Q(tracking_id=lookup_val)
@@ -502,7 +504,7 @@ class DashboardStatsView(APIView):
             end = start.replace(year=start.year + 1)
 
         def cases_for(model):
-            queryset = scope_cases(model.objects.all(), request.user)
+            queryset = scope_cases(model.objects.prefetch_related('payout_proofs'), request.user)
             if start is not None:
                 queryset = queryset.filter(created_at__gte=start, created_at__lt=end)
             return list(queryset)
@@ -515,6 +517,13 @@ class DashboardStatsView(APIView):
             women_cases = [case for case in women_cases if normalize(case.barangay_name) == normalize(selected_barangay)]
             aics_cases = [case for case in aics_cases if normalize(case.barangay_name) == normalize(selected_barangay)]
         all_cases = women_cases + aics_cases
+        from .payout_proofs import proof_data
+        payout_proofs = {}
+        def proofs_for(case):
+            key = (type(case), case.pk)
+            if key not in payout_proofs:
+                payout_proofs[key] = [proof_data(proof) for proof in case.payout_proofs.all()]
+            return payout_proofs[key]
         filtered_records = [{
             'id': case.case_number or case.tracking_id,
             'name': case.beneficiary_name,
@@ -522,6 +531,7 @@ class DashboardStatsView(APIView):
             'program': case.get_category_display() if hasattr(case, 'category') else f'AICS - {case.get_aics_type_display()}',
             'status': case.get_status_display(),
             'module': 'women-solo-parent' if hasattr(case, 'category') else 'aics',
+            'payoutProofs': proofs_for(case) if case.status in {CaseStatus.RELEASED_COMPLETED, CaseStatus.CASE_CLOSED} else [],
         } for case in sorted(all_cases, key=lambda case: (case.created_at.timestamp() if case.created_at else float('-inf'), case.pk), reverse=True)[:100]] if selected_barangay else []
 
         total_beneficiaries = len(all_cases)
@@ -599,10 +609,18 @@ class DashboardStatsView(APIView):
                         'statusLabel': c.get_status_display() if hasattr(c, 'get_status_display') else c.status,
                         'author': log.get('performed_by') or 'MSWD Officer',
                         'timestamp': timestamp or (c.created_at.isoformat() if c.created_at else ''),
+                        '_case': c,
+                        '_proof_id': log.get('proof_id') if log.get('action') == 'PAYOUT_PROOF_VERIFIED' else None,
                     })
 
         recent_activities.sort(key=lambda a: a.get('timestamp') or '', reverse=True)
         capped_activities = recent_activities[:10]
+        for activity in capped_activities:
+            case = activity.pop('_case')
+            proof_id = activity.pop('_proof_id')
+            activity['payoutProofs'] = proofs_for(case) if case.status in {CaseStatus.RELEASED_COMPLETED, CaseStatus.CASE_CLOSED} else [
+                proof for proof in proofs_for(case) if proof['id'] == proof_id
+            ] if proof_id is not None else []
 
         return Response({
             'success': True,

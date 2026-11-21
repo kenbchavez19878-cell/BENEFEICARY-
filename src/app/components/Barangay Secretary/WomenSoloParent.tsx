@@ -1,3 +1,4 @@
+import { PayoutProofActions, PayoutProofGallery } from "../PayoutProofPreview";
 import { matchesCaseTableFilters } from "../../utils/caseTableFilters";
 import { IntakeDocumentUploads, SOLO_PARENT_REQUIREMENTS, WOMEN_REQUIREMENTS, aicsRequirements } from "../IntakeDocumentUploads";
 import type { IntakeDocument } from "../../services/caseService";
@@ -277,6 +278,11 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
       });
       seenReturnedCases.current = returned;
       setProfilingRecords(rows.map(mapDbRowToProfilingRecord));
+      setSelectedProfile(current => {
+        if (!current || (isSecretary && current.rawDbRow?.status === 'RETURNED_FOR_CORRECTION')) return current;
+        const latest = rows.find(row => row.case_number === current.trackingId);
+        return latest ? mapDbRowToProfilingRecord(latest) : current;
+      });
     } catch (err) {
       console.warn("[PostgreSQL] Could not refresh cases:", err);
     }
@@ -740,6 +746,8 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
 
                 {canCorrectReturned && <IntakeDocumentUploads requirements={correctionRequirements} documents={correctedDocuments} onChange={setCorrectedDocuments} disabled={profileSaving} existingDocuments={selectedProfile.rawDbRow?.documents || []} />}
 
+                <PayoutProofGallery proofs={selectedProfile.rawDbRow?.payout_proofs || []} />
+
                 {/* 6. BARANGAY VERIFICATION */}
                 <section className="bg-blue-50/50 p-6 rounded-xl border border-blue-100">
                   <h3 className="text-sm font-bold text-blue-900 uppercase tracking-widest border-b border-blue-200 pb-2 mb-4">Barangay Verification</h3>
@@ -968,6 +976,7 @@ export function WomenSoloParent({ onNavigate, allowedSubModules, userRole, accou
                             </td>
                             <td className="px-6 py-4 text-right">
                               <div className="flex items-center justify-end gap-2">
+                                {["RELEASED_COMPLETED", "CASE_CLOSED"].includes(record.rawDbRow?.status || "") && <PayoutProofActions proofs={record.rawDbRow?.payout_proofs} />}
                                 {isSecretary ? (
                                   <Button 
                                     variant="outline" 

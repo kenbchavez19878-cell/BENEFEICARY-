@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import {
   Users,
   FolderOpen,
@@ -29,6 +29,8 @@ import {
   subscribeDataUpdated, 
   type DashboardStats, type DashboardPeriod 
 } from "../../services/caseService";
+
+const PayoutProofActions = lazy(() => import('../PayoutProofPreview').then(module => ({ default: module.PayoutProofActions })));
 
 interface MainDashboardProps {
   onNavigate?: (view: string) => void;
@@ -538,6 +540,7 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
                         <div className="min-w-0">
                           <p className="break-words text-sm font-semibold text-gray-900">{record.name}</p>
                           <p className="break-words text-xs text-gray-500">{record.id} - {record.program} - {record.barangay}</p>
+                          {!!record.payoutProofs?.length && <Suspense fallback={null}><PayoutProofActions proofs={record.payoutProofs} /></Suspense>}
                         </div>
                         <Badge variant="outline" className="self-start text-xs text-blue-900">{record.status}</Badge>
                       </div>)}
@@ -599,6 +602,8 @@ export function MainDashboard({ onNavigate = () => {}, userRole = "Staff" }: Mai
                                 {act.description}
                               </p>
                             )}
+
+                            {!!act.payoutProofs?.length && <Suspense fallback={null}><PayoutProofActions proofs={act.payoutProofs} /></Suspense>}
 
                             <div className="flex items-center gap-4 text-[11px] text-gray-400">
                               <span className="flex items-center gap-1 font-medium text-gray-500">

@@ -169,6 +169,24 @@ class CaseIntakeMixin:
                 for item in logs
             ):
                 errors['monitoring_logs'] = 'Case history must be a list of objects with text fields.'
+            else:
+                from .payout_proofs import payout_history_event
+                protected = {f'payout-proof-{proof.pk}': payout_history_event(proof) for proof in (self.instance.payout_proofs.all() if self.instance else [])}
+                if any((log.get('action') == 'PAYOUT_PROOF_VERIFIED' or log.get('type') == 'proof') and log.get('id') not in protected for log in logs):
+                    errors['monitoring_logs'] = 'Verified payout events are created only through payout proof verification.'
+                else:
+                    present, merged = set(), []
+                    for log in logs:
+                        key = log.get('id')
+                        if key in protected:
+                            if key in present:
+                                continue
+                            present.add(key)
+                            merged.append(protected[key])
+                        else:
+                            merged.append(log)
+                    attrs['monitoring_logs'] = [event for key, event in protected.items() if key not in present] + merged
+
 
         workflow = attrs.get('workflow_data', workflow_snapshot(self.instance))
         assessment = workflow.get('socialAssessment', {})

@@ -1,3 +1,4 @@
+import { hasMatchingPayoutProof } from "./payoutProof";
 import type { CaseData } from "../components/MSWDCaseWorkflowModal";
 
 export const ELIGIBILITY_CODES: Record<string, string> = {
@@ -48,6 +49,10 @@ export function getWorkflowStepError(state: CaseData, step: number): string | nu
     const approved = state.moduleType === "aics" ? state.servicePlan.approvedFinancialAmount : state.servicePlan.emergencyCashAidAmount;
     if (state.serviceRelease.approvedAmount !== approved) return "Release amount must match the approved plan.";
     if (releaseMethod(state) === "Guarantee Letter / GL" && !state.serviceRelease.guaranteeLetterNumber.trim()) return "Enter the guarantee letter number.";
+  }
+  if (step === 8 && state.eligibility.status !== 'Not Eligible' && !nonFinancialKind(state)) {
+    const approved = state.moduleType === 'aics' ? state.servicePlan.approvedFinancialAmount : state.servicePlan.emergencyCashAidAmount;
+    if (approved > 0 && !hasMatchingPayoutProof(state.payoutProofs, approved, state.serviceRelease.payoutDate, state.completedActivities?.approval)) return 'In Step 8, upload and verify payout proof with an OR number before closing this financial assistance case.';
   }
   if (step === 8 && !state.closureNotes?.trim()) return "Enter the closure notes before closing this case.";
   return null;

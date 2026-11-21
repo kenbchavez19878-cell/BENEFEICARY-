@@ -53,6 +53,12 @@ def required_replacements(case):
 
 
 class CaseDocumentsMixin(serializers.Serializer):
+    payout_proofs = serializers.SerializerMethodField()
+
+    def get_payout_proofs(self, obj):
+        from .payout_proofs import proof_data
+        return [proof_data(proof) for proof in obj.payout_proofs.all()]
+
     documents = serializers.SerializerMethodField()
     correction_notes = serializers.SerializerMethodField()
     uploaded_files = serializers.ListField(child=serializers.FileField(), write_only=True, required=False, max_length=20)

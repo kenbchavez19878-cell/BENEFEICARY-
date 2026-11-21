@@ -239,6 +239,9 @@ def validate_workflow(instance, attrs, workflow, sections, is_aics):
             else:
                 require('release')
                 require('monitoring')
+                if award > 0 and old.get('fulfillmentKind') not in NON_FINANCIAL:
+                    from .payout_proofs import require_payout_proof
+                    require_payout_proof(instance, award, instance.payout_date)
             if not text(workflow.get('closureNotes')):
                 raise ValidationError({'closureNotes': 'Record the final outcome.'})
             completed['closure'] = stamp

@@ -4,7 +4,7 @@ from django.core import serializers
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection, transaction
 
-from api.models import AicsCase, Beneficiary, CaseDocument, WomenAndSoloParentCase
+from api.models import AicsCase, Beneficiary, CaseDocument, WomenAndSoloParentCase, PayoutProof
 
 
 class Command(BaseCommand):
@@ -17,7 +17,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         if not options['confirm_delete']:
             raise CommandError('Explicit --confirm-delete is required. This empties all beneficiary and case tables.')
-        models = (Beneficiary, WomenAndSoloParentCase, AicsCase, CaseDocument)
+        models = (Beneficiary, WomenAndSoloParentCase, AicsCase, CaseDocument, PayoutProof)
         backup = Path(options['backup']).resolve()
         try:
             with transaction.atomic():

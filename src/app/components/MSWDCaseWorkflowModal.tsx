@@ -1,7 +1,10 @@
+import { PayoutProofPreview } from "./PayoutProofPreview";
+import { PayoutProofVerification } from "./PayoutProofVerification";
+import type { PayoutProof } from "../utils/payoutProof";
 import { openDocumentPreview } from "../services/documentService";
 import { ELIGIBILITY_CODES, getWorkflowStepError, workflowStepPayload, nonFinancialKind, releaseMethod, accessibleStep } from "../utils/caseWorkflowData";
 import type { IntakeProfile } from "../utils/intakeProfile";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useDatabaseHealth } from "../hooks/useDatabaseHealth";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
@@ -161,7 +164,9 @@ export interface TimelineEntry {
   author: string;
   title: string;
   description: string;
-  type?: "visit" | "update" | "note" | "status";
+  type?: "visit" | "update" | "note" | "status" | "proof";
+  proofFileUrl?: string;
+  proofId?: number;
 }
 
 async function openWorkflowDocument(event: React.MouseEvent<HTMLAnchorElement>, url: string) {
@@ -181,6 +186,7 @@ export interface DocumentCheckItem {
 }
 
 export interface CaseData {
+  payoutProofs?: PayoutProof[];
   id?: number;
   trackingId: string;
   beneficiaryName: string;
@@ -253,6 +259,7 @@ export function buildSafeCaseData(
     beneficiaryName: rawItem?.beneficiaryName ?? mapped.beneficiaryName,
     beneficiaryId: rawItem?.beneficiaryId ?? mapped.beneficiaryId,
     applicantProfile: { ...mapped.applicantProfile!, ...rawItem?.applicantProfile },
+    payoutProofs: rawItem?.payoutProofs ?? mapped.payoutProofs,
     barangay: rawItem?.barangay ?? mapped.barangay,
     statusCode: rawItem?.statusCode ?? mapped.statusCode,
     endorsementDate: rawItem?.endorsementDate ?? mapped.endorsementDate,
@@ -371,7 +378,14 @@ function MSWDCaseWorkflowModalInner({
   );
 
   // PostgreSQL Persistence & Database State
-  const [isSaving, setIsSaving] = useState(false);
+  const [workflowSaving, setIsSaving] = useState(false);
+  const [proofSaving, setProofSaving] = useState(false);
+  const proofUploadInFlight = useRef(false);
+  const handleProofSavingChange = useCallback((saving: boolean) => {
+    proofUploadInFlight.current = saving;
+    setProofSaving(saving);
+  }, []);
+  const isSaving = workflowSaving || proofSaving;
   const validationSaveInFlight = useRef(false);
   const requestInFlight = useRef(false);
   const workflowVersion = useRef<number | undefined>(caseState.workflowVersion);
@@ -420,6 +434,7 @@ function MSWDCaseWorkflowModalInner({
   // Helper to persist step updates directly to PostgreSQL backend
   const persistStepData = async (stepNumber: number, payload: any) => {
     if (requestInFlight.current || isSecretary || isLoadingCase) return null;
+    if (proofUploadInFlight.current) { toast.info('Wait for payout proof verification to finish before processing the case.'); return null; }
     if (caseLoadFailed) { toast.error('Load the saved intake successfully before processing this case. Close and reopen it to retry.'); return null; }
     if (caseState.statusCode === "CASE_CLOSED") {
       toast.info("This case is closed and available for read-only review.");
@@ -472,7 +487,7 @@ function MSWDCaseWorkflowModalInner({
       return false;
     }
     const stepToPersist = explicitStep !== undefined ? explicitStep : currentStep;
-    const error = getWorkflowStepError(caseState, stepToPersist);
+    const error = newCode === "RETURNED_FOR_CORRECTION" ? null : getWorkflowStepError(caseState, stepToPersist);
     if (error) { toast.error(error); return false; }
     validationSaveInFlight.current = true;
     const safeCfg = getSafeStatusConfig(newCode);
@@ -507,7 +522,7 @@ function MSWDCaseWorkflowModalInner({
       return false;
     }
     const mapped = mapDbRecordToCaseData(saved, moduleType);
-    const confirmed = { ...updated, statusCode: saved.status, workflowVersion: mapped.workflowVersion, completedActivities: mapped.completedActivities, serviceRelease: mapped.serviceRelease, documents: mapped.documents, correctionNotes: mapped.correctionNotes };
+    const confirmed = { ...updated, statusCode: saved.status, workflowVersion: mapped.workflowVersion, completedActivities: mapped.completedActivities, serviceRelease: mapped.serviceRelease, documents: mapped.documents, correctionNotes: mapped.correctionNotes, payoutProofs: mapped.payoutProofs };
     setCaseState(confirmed);
     onUpdateCase?.(confirmed);
     toast.success(`Workflow Status Saved to Database`, {
@@ -634,6 +649,7 @@ function MSWDCaseWorkflowModalInner({
             onClick={onClose}
             className="text-white/80 hover:text-white p-1.5 hover:bg-white/10 rounded-lg transition-colors self-start sm:self-center"
             title="Close Case Processing"
+            disabled={isSaving}
           >
             <X className="size-5" />
           </button>
@@ -653,7 +669,7 @@ function MSWDCaseWorkflowModalInner({
                 return (
                   <button
                     key={step.num}
-                    disabled={step.num > accessibleStep(caseState) || (isStep5Locked && activeStep < 5)}
+                    disabled={isSaving || step.num > accessibleStep(caseState) || (isStep5Locked && activeStep < 5)}
                     onClick={() => setCurrentStep(step.num)}
                     className={`flex flex-col items-center p-1.5 rounded-xl transition-all relative group flex-1 ${
                       isActive
@@ -1667,7 +1683,7 @@ function MSWDCaseWorkflowModalInner({
                 {/* Release Method */}
                 <div className="space-y-1.5">
                   <label className="font-bold text-gray-800">Release Method</label>
-                  <select
+                  <select disabled={isSaving}
                     value={releaseMethod(caseState)}
                     onChange={(e) =>
                       setCaseState({
@@ -1689,7 +1705,7 @@ function MSWDCaseWorkflowModalInner({
                 {/* Guarantee Letter (GL) Number */}
                 <div className="space-y-1.5">
                   <label className="font-bold text-gray-800">Guarantee Letter (GL) Number</label>
-                  <input
+                  <input disabled={isSaving}
                     type="text"
                     value={caseState.serviceRelease?.guaranteeLetterNumber || ""}
                     onChange={(e) =>
@@ -1709,7 +1725,7 @@ function MSWDCaseWorkflowModalInner({
                 {/* Payout Date */}
                 <div className="space-y-1.5">
                   <label className="font-bold text-gray-800">Payout Date</label>
-                  <input
+                  <input disabled={isSaving}
                     type="date"
                     value={caseState.serviceRelease?.payoutDate || ""}
                     onChange={(e) =>
@@ -1728,7 +1744,7 @@ function MSWDCaseWorkflowModalInner({
 
               <div className="space-y-1.5">
                 <label htmlFor="release-payout-officer" className="font-bold text-gray-800">Payout Officer / Accountable Service Officer *</label>
-                <input
+                <input disabled={isSaving}
                   id="release-payout-officer"
                   type="text"
                   required
@@ -1878,6 +1894,7 @@ function MSWDCaseWorkflowModalInner({
                           <span className="text-[10px] text-gray-400 font-mono">{item.date}</span>
                         </div>
                         <p className="text-gray-600 leading-relaxed">{item.description}</p>
+                        {caseState.payoutProofs?.find(proof => proof.id === item.proofId) ? <PayoutProofPreview proof={caseState.payoutProofs.find(proof => proof.id === item.proofId)!} /> : item.proofFileUrl && <a href={item.proofFileUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-700 underline" onClick={event => void openWorkflowDocument(event, item.proofFileUrl!)}>View payout proof</a>}
                         <p className="text-[10px] text-blue-700 font-semibold">Logged by: {item.author}</p>
                       </div>
                     </div>
@@ -1931,6 +1948,20 @@ function MSWDCaseWorkflowModalInner({
                   {caseState.statusCode === "CASE_CLOSED" ? "COMPLETED / CLOSED" : "Pending Final Closure"}
                 </Badge>
               </div>
+
+              {caseState.eligibility.status !== "Not Eligible" && !nonFinancialRelease && caseState.serviceRelease.approvedAmount > 0 && <PayoutProofVerification
+                key={`${caseState.trackingId}-closure`}
+                caseNumber={caseState.trackingId} moduleType={moduleType} expectedVersion={caseState.workflowVersion}
+                payoutDate={caseState.serviceRelease.payoutDate} amount={caseState.serviceRelease.approvedAmount}
+                approval={caseState.completedActivities?.approval} proofs={caseState.payoutProofs}
+                canUpload={caseState.statusCode === 'RELEASED_COMPLETED' && !isLoadingCase && !workflowSaving && !caseLoadFailed}
+                onSavingChange={handleProofSavingChange}
+                onUploaded={updated => {
+                  const mapped = mapDbRecordToCaseData(updated, moduleType);
+                  workflowVersion.current = updated.workflow_version;
+                  setCaseState(current => ({ ...current, workflowVersion: updated.workflow_version, payoutProofs: mapped.payoutProofs, timeline: mapped.timeline }));
+                }}
+              />}
 
               {/* Summary Preview Card of all data entered from Steps 1–7 */}
               <Card className="border border-blue-200 bg-gradient-to-br from-blue-50/40 via-white to-gray-50 shadow-sm overflow-hidden">
@@ -2083,7 +2114,7 @@ function MSWDCaseWorkflowModalInner({
               <Button
                 variant="outline"
                 size="sm"
-                disabled={activeStep === 1}
+                disabled={isSaving || activeStep === 1}
                 onClick={() => setCurrentStep((prev) => Math.max(1, prev - 1))}
                 className="text-xs"
               >

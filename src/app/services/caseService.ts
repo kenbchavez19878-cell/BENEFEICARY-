@@ -1,3 +1,4 @@
+import type { PayoutProof } from "../utils/payoutProof";
 import { authFetch } from "./authService";
 import { mapIntakeProfile, mapNameFields, type SeparatedNameFields } from "../utils/intakeProfile";
 import type { CaseData, DocumentCheckItem, TimelineEntry, WorkflowStatusCode } from "../components/MSWDCaseWorkflowModal";
@@ -21,6 +22,7 @@ function intakeRequest(data: object, documents: IntakeDocument[] = []): RequestI
 }
 
 export interface DbCaseRecord {
+  payout_proofs?: PayoutProof[];
   correction_notes?: string;
   id?: number;
   workflow_version?: number;
@@ -149,6 +151,7 @@ export function mapDbRecordToCaseData(row: DbCaseRecord | null | undefined, modu
     workflowVersion: safeRow.workflow_version,
     completedActivities: workflow._completed || {},
     applicantProfile: mapIntakeProfile(safeRow),
+    payoutProofs: Array.isArray(safeRow.payout_proofs) ? safeRow.payout_proofs : [],
     beneficiaryId: trackingNumber,
     barangay: barangayName,
     moduleType,
@@ -194,6 +197,8 @@ export function mapDbRecordToCaseData(row: DbCaseRecord | null | undefined, modu
       title: log.title ?? log.action ?? "",
       description: log.description ?? log.note ?? "",
       type: log.type ?? "status",
+      proofId: log.action === "PAYOUT_PROOF_VERIFIED" && Number.isInteger(log.proof_id) ? log.proof_id : undefined,
+      proofFileUrl: log.action === "PAYOUT_PROOF_VERIFIED" && Number.isInteger(log.proof_id) ? `/api/payout-proofs/${log.proof_id}/file` : undefined,
     })) : [],
     caseClosedDate: safeRow.status === 'CASE_CLOSED' ? (safeRow.updated_at ? new Date(safeRow.updated_at).toISOString().split('T')[0] : undefined) : undefined,
     closureNotes: workflow.closureNotes ?? '',
@@ -381,7 +386,7 @@ export interface DashboardFilters {
   barangay?: string;
 }
 export interface DashboardStats {
-  filteredRecords?: Array<{ id: string; name: string; barangay: string; program: string; status: string; module: string }>;
+  filteredRecords?: Array<{ id: string; name: string; barangay: string; program: string; status: string; module: string; payoutProofs?: PayoutProof[] }>;
   matchedRecords?: number;
   totalBeneficiaries: number;
   activeCases: number;
@@ -404,6 +409,7 @@ export interface DashboardStats {
     statusLabel: string;
     author: string;
     timestamp?: string;
+    payoutProofs?: PayoutProof[];
   }>;
 }
 
@@ -563,4 +569,19 @@ export async function apiReturnCaseForCorrection(id: string | number, notes: str
     moduleType, status: 'RETURNED_FOR_CORRECTION', expected_version: expectedVersion,
     correctionNotes: notes.trim(), action_note: notes.trim(),
   });
+}
+
+export async function apiUploadPayoutProof(id: string, data: {
+  moduleType: string; expected_version: number; proof_type: 'OFFICIAL_RECEIPT' | 'PAYOUT_PHOTO';
+  receipt_number: string; received_by: string; released_on: string; confirmed_received: boolean; notes: string;
+}, file: File): Promise<DbCaseRecord> {
+  const body = new FormData();
+  Object.entries(data).forEach(([key, value]) => body.append(key, String(value)));
+  body.append('file', file, file.name);
+  const response = await authFetch(`/api/cases/${encodeURIComponent(id)}/payout-proof`, { method: 'POST', body });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(extractErrorMessage(result, 'Could not save payout proof.'));
+  if (!result.data || !Array.isArray(result.data.payout_proofs)) throw new Error('The proof response was incomplete. Reopen the case to check whether the proof was saved before retrying.');
+  notifyDataUpdated();
+  return result.data;
 }

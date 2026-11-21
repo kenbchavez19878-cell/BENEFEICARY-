@@ -438,3 +438,32 @@ class AicsCase(CaseIntakeFields):
 
     def __str__(self):
         return f"[{self.case_number}] {self.beneficiary_name} - {self.get_aics_type_display()} ({self.get_status_display()})"
+
+
+def payout_proof_path(instance, filename):
+    return f'payout_proofs/{uuid.uuid4().hex}{Path(filename).suffix.lower()}'
+
+
+class PayoutProof(models.Model):
+    women_case = models.ForeignKey(WomenAndSoloParentCase, null=True, blank=True, on_delete=models.CASCADE, related_name='payout_proofs')
+    aics_case = models.ForeignKey(AicsCase, null=True, blank=True, on_delete=models.CASCADE, related_name='payout_proofs')
+    proof_type = models.CharField(max_length=30, choices=[('OFFICIAL_RECEIPT', 'Official Receipt'), ('PAYOUT_PHOTO', 'Payout Photo')])
+    file = models.FileField(upload_to=payout_proof_path)
+    original_name = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=80)
+    receipt_number = models.CharField(max_length=120, blank=True)
+    received_by = models.CharField(max_length=150)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    released_on = models.DateField()
+    approval_checkpoint = models.CharField(max_length=100, blank=True)
+    notes = models.TextField(blank=True)
+    verified_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    verified_by_name = models.CharField(max_length=255)
+    verified_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['-verified_at', '-pk']
+        constraints = [models.CheckConstraint(
+            condition=(models.Q(women_case__isnull=False, aics_case__isnull=True) | models.Q(women_case__isnull=True, aics_case__isnull=False)),
+            name='payout_proof_has_one_case',
+        )]

@@ -1,3 +1,4 @@
+from .payout_proofs import PayoutProofUploadView, PayoutProofFileView
 from django.urls import re_path
 from .auth_views import SessionView, LoginView, LogoutView
 from .views import (
@@ -12,6 +13,8 @@ from .views import (
 )
 
 urlpatterns = [
+    re_path(r'^cases/(?P<lookup_value>[^/]+)/payout-proof/?$', PayoutProofUploadView.as_view(), name='payout-proof-upload'),
+    re_path(r'^payout-proofs/(?P<pk>[0-9]+)/file/?$', PayoutProofFileView.as_view(), name='payout-proof-file'),
     re_path(r'^auth/session/?$', SessionView.as_view()),
     re_path(r'^auth/login/?$', LoginView.as_view()),
     re_path(r'^auth/logout/?$', LogoutView.as_view()),

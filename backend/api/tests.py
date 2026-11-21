@@ -83,7 +83,7 @@ class IntakeDocumentTests(TestCase):
                     send({'status': 'APPROVED_FOR_RELEASE'}, 400)
                     send({'eligibility': 'FOR_REFERRAL' if referral else 'ELIGIBLE', 'eligibilityDetails': {'notes': 'Supported determination'}, 'status': 'ELIGIBILITY_EVALUATED'})
                     award = 'approved_amount' if module == 'aics' else 'financial_aid_amount'
-                    send({award: 0 if nonfinancial else 5000, 'servicePlan': {'nonMonetarySupport': 'Hospital referral' if referral else 'Approved assistance'}, 'status': 'APPROVED_FOR_RELEASE'})
+                    planned = send({award: 0 if nonfinancial else 5000, 'servicePlan': {'nonMonetarySupport': 'Hospital referral' if referral else 'Approved assistance'}, 'status': 'APPROVED_FOR_RELEASE'})
                     release = {'release_method': kind if nonfinancial else 'CASH', 'payout_date': '2026-11-13', 'status': 'RELEASED_COMPLETED'}
                     for bad in ('', 'N/A', '12345', {'name': 'Maria Santos'}, 42):
                         send({**release, 'serviceRelease': {'payoutOfficer': bad}}, 400)
@@ -93,7 +93,15 @@ class IntakeDocumentTests(TestCase):
                     send({'payout_date': '2026-11-14'}, 400)
                     send({'expected_version': released['workflow_version'] - 1}, 400)
                     send({'closureNotes': 'Complete', 'status': 'CASE_CLOSED'}, 400)
-                    send({'monitoring_logs': [{'id': 'follow-up', 'type': 'visit', 'title': 'Visit', 'description': 'Delivery confirmed'}]})
+                    monitored = send({'monitoring_logs': [{'id': 'follow-up', 'type': 'visit', 'title': 'Visit', 'description': 'Delivery confirmed'}]})
+                    if not nonfinancial:
+                        send({'closureNotes': 'Complete', 'status': 'CASE_CLOSED'}, 400)
+                        proof = self.client.post(f"/api/cases/{case['tracking_id']}/payout-proof", {
+                            'moduleType': module, 'expected_version': monitored['workflow_version'], 'proof_type': 'OFFICIAL_RECEIPT',
+                            'receipt_number': 'OR-TEST-001', 'received_by': 'Beneficiary Parent', 'released_on': '2026-11-13', 'confirmed_received': True,
+                            'file': SimpleUploadedFile('receipt.pdf', b'%PDF-1.7\nreceipt'),
+                        }, format='multipart')
+                        self.assertEqual(proof.status_code, 201, proof.data)
                     send({'closureNotes': 'Complete', 'status': 'CASE_CLOSED'})
                     send({'status': 'UNDER_REVIEW'}, 400)
 
@@ -262,6 +270,12 @@ class IntakeDocumentTests(TestCase):
             self.assertEqual(saved.status_code, 200, saved.data)
             monitored = self.client.patch(endpoint, {'monitoring_logs': [{'id': 'monitor-1', 'type': 'visit', 'title': 'Follow-up', 'description': 'Service confirmed'}]}, format='json')
             self.assertEqual(monitored.status_code, 200, monitored.data)
+            proof = self.client.post(f"/api/cases/{case['tracking_id']}/payout-proof", {
+                'moduleType': module, 'expected_version': monitored.data['data']['workflow_version'], 'proof_type': 'OFFICIAL_RECEIPT',
+                'receipt_number': 'OR-MERGE-001', 'received_by': 'Beneficiary Parent', 'released_on': '2026-11-13', 'confirmed_received': True,
+                'file': SimpleUploadedFile('receipt.pdf', b'%PDF-1.7\nreceipt'),
+            }, format='multipart')
+            self.assertEqual(proof.status_code, 201, proof.data)
             saved = self.client.patch(endpoint, {'closureNotes': 'Services completed', 'status': 'CASE_CLOSED'}, format='json')
             self.assertEqual(saved.status_code, 200, saved.data)
             detail = self.client.get(f"/api/cases/{case['tracking_id']}").data['data']
